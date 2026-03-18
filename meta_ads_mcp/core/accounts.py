@@ -94,7 +94,9 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
                         "total": len(accounts),
                     }, indent=2)
         except Exception as e:
-            logger.warning("get_ad_accounts: Rule1 API fallback failed: %s", e)
+            import sys, traceback
+            print(f"[DIAG] get_ad_accounts EXCEPTION: {e}", file=sys.stderr, flush=True)
+            traceback.print_exc(file=sys.stderr)
 
     # Direct Meta token path — query Meta's Graph API
     if not access_token:
