@@ -339,7 +339,8 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
             logger.warning("HTTP Auth Middleware: No authentication tokens found in headers")
             # Return 401 with WWW-Authenticate header pointing to OAuth metadata.
             # This tells MCP clients (Claude Code, etc.) to start the OAuth flow.
-            if path in ("/mcp", "/mcp/"):
+            # Only gate POST requests — GET is used for SSE stream init.
+            if path in ("/mcp", "/mcp/") and request.method == "POST":
                 from starlette.responses import Response
                 proto = request.headers.get("x-forwarded-proto", request.url.scheme)
                 host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.hostname
