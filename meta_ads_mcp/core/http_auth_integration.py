@@ -337,6 +337,22 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
 
         if not bearer_token and not direct_meta:
             logger.warning("HTTP Auth Middleware: No authentication tokens found in headers")
+            # Return 401 with WWW-Authenticate header pointing to OAuth metadata.
+            # This tells MCP clients (Claude Code, etc.) to start the OAuth flow.
+            if path in ("/mcp", "/mcp/"):
+                from starlette.responses import Response
+                proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+                host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.hostname
+                resource_metadata_url = f"{proto}://{host}/.well-known/oauth-protected-resource"
+                return Response(
+                    content="Authentication required",
+                    status_code=401,
+                    headers={
+                        "WWW-Authenticate": f'Bearer resource_metadata="{resource_metadata_url}"',
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Expose-Headers": "WWW-Authenticate",
+                    },
+                )
 
         try:
             response = await call_next(request)
