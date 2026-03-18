@@ -272,10 +272,42 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
 
     Also validates the Bearer token against the Rule1 API and stores
     the org context for downstream use.
+
+    Handles OAuth 2.1 discovery endpoints directly (before FastMCP routing)
+    since injecting Starlette routes into FastMCP's app doesn't work reliably.
     """
 
+    # Paths that this middleware handles directly (OAuth 2.1 discovery)
+    _OAUTH_PATHS = {
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/mcp/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-authorization-server/mcp",
+        "/.well-known/openid-configuration",
+        "/.well-known/openid-configuration/mcp",
+        "/mcp/.well-known/openid-configuration",
+    }
+
     async def dispatch(self, request: Request, call_next):
-        logger.debug("HTTP Auth Middleware: Processing request to %s", request.url.path)
+        path = request.url.path.rstrip("/")
+        logger.debug("HTTP Auth Middleware: Processing request to %s", path)
+
+        # Handle OAuth discovery endpoints directly
+        if path in self._OAUTH_PATHS:
+            from .oauth_metadata import protected_resource_metadata, auth_server_metadata, cors_preflight
+            if request.method == "OPTIONS":
+                return await cors_preflight(request)
+            if "oauth-protected-resource" in path:
+                return await protected_resource_metadata(request)
+            # Both oauth-authorization-server and openid-configuration
+            return await auth_server_metadata(request)
+
+        if path == "/register":
+            from .oauth_metadata import register_client, cors_preflight
+            if request.method == "OPTIONS":
+                return await cors_preflight(request)
+            return await register_client(request)
 
         headers = dict(request.headers)
 
