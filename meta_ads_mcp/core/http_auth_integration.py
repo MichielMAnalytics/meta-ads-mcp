@@ -392,16 +392,23 @@ class AuthInjectionMiddleware:
 
 
 def setup_starlette_middleware(app):
-    """Wrap the Starlette app with AuthInjectionMiddleware."""
+    """Install AuthInjectionMiddleware as a raw ASGI wrapper.
+
+    We force-build Starlette's middleware stack and then wrap it with
+    our ASGI middleware. This ensures ContextVars propagate correctly
+    (unlike BaseHTTPMiddleware which runs call_next in a separate task).
+    """
     if not app:
         logger.error("Cannot setup middleware, app is None.")
         return
 
-    # Use add_middleware with the raw ASGI class. Starlette accepts any
-    # callable(app) -> ASGI-app via add_middleware, not just
-    # BaseHTTPMiddleware subclasses.
-    try:
-        app.add_middleware(AuthInjectionMiddleware)
-        logger.info("AuthInjectionMiddleware (raw ASGI) installed successfully.")
-    except Exception as e:
-        logger.error("Failed to add AuthInjectionMiddleware: %s", e, exc_info=True)
+    # Force Starlette to build its internal middleware stack now
+    if hasattr(app, "build_middleware_stack"):
+        app.middleware_stack = app.build_middleware_stack()
+        logger.debug("Forced middleware stack build: %s", type(app.middleware_stack))
+
+    if app.middleware_stack is not None:
+        app.middleware_stack = AuthInjectionMiddleware(app.middleware_stack)
+        logger.info("AuthInjectionMiddleware wrapping middleware_stack successfully.")
+    else:
+        logger.error("middleware_stack is None — cannot install AuthInjectionMiddleware")
