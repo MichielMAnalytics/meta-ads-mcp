@@ -320,10 +320,17 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
 
 
 def setup_starlette_middleware(app):
-    """Add AuthInjectionMiddleware to the Starlette app if not already present."""
+    """Add AuthInjectionMiddleware and OAuth routes to the Starlette app."""
     if not app:
         logger.error("Cannot setup Starlette middleware, app is None.")
         return
+
+    # Add OAuth 2.1 discovery routes (RFC 9728 / RFC 8414)
+    try:
+        from .oauth_metadata import add_oauth_routes
+        add_oauth_routes(app)
+    except Exception as e:
+        logger.error("Failed to add OAuth metadata routes: %s", e, exc_info=True)
 
     already_added = any(
         mw.cls == AuthInjectionMiddleware for mw in app.user_middleware
