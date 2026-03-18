@@ -2,7 +2,7 @@
 OAuth 2.1 Metadata Endpoints for MCP Spec Compliance
 
 Implements RFC 9728 (Protected Resource Metadata) and RFC 8414
-(Authorization Server Metadata) so MCP clients like Claude Code can
+(Authorization Server Metadata) so that MCP clients like Claude Code can
 discover the Clerk OAuth authorization server and authenticate users.
 
 Requires CLERK_PUBLISHABLE_KEY environment variable.
