@@ -40,10 +40,13 @@ def _normalize_account_monetary_fields(account: dict) -> dict:
 
 
 @mcp_server.tool()
-@meta_api_tool
 async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me", limit: int = 200) -> str:
     """
     Get ad accounts accessible by a user.
+
+    When authenticated via Rule1 (Clerk/pgs_ token), returns connected accounts
+    from the Rule1 database. When a direct Meta access_token is provided,
+    queries Meta's Graph API directly.
 
     amount_spent and balance are returned in currency units (e.g. USD dollars),
     not cents.
@@ -53,6 +56,41 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
         user_id: Meta user ID or "me" for the current user
         limit: Maximum number of accounts to return (default: 200)
     """
+    from .utils import logger
+
+    # If no explicit access_token, try to list accounts from Rule1 API
+    if not access_token:
+        try:
+            from .http_auth_integration import FastMCPAuthIntegration
+            from . import rule1_auth
+
+            # Check for direct Meta token first
+            direct_meta = FastMCPAuthIntegration.get_direct_meta_token()
+            if direct_meta:
+                access_token = direct_meta
+                # Fall through to Meta API path below
+            else:
+                bearer = FastMCPAuthIntegration.get_auth_token()
+                if bearer:
+                    logger.debug("get_ad_accounts: fetching accounts from Rule1 API")
+                    accounts = await rule1_auth.list_ad_accounts(bearer)
+                    return json.dumps({
+                        "data": accounts,
+                        "source": "rule1",
+                        "total": len(accounts),
+                    }, indent=2)
+        except Exception as e:
+            logger.warning("get_ad_accounts: Rule1 API fallback failed: %s", e)
+
+    # Direct Meta token path — query Meta's Graph API
+    if not access_token:
+        return json.dumps({
+            "error": {
+                "message": "Authentication Required",
+                "details": "Provide a Bearer token (Clerk JWT or pgs_xxx) or a direct Meta access_token",
+            }
+        }, indent=2)
+
     endpoint = f"{user_id}/adaccounts"
     params = {
         "fields": "id,name,account_id,account_status,amount_spent,balance,currency,age,business_city,business_country_code",
