@@ -241,16 +241,14 @@ def setup_fastmcp_http_auth(mcp_server):
         original_app_provider_method = getattr(mcp_server, method_name)
 
         def new_patched_app_provider_method(*args, _orig=original_app_provider_method, _name=method_name, **kwargs):
+            import sys
+            print(f"[DIAG] patched {_name} called!", file=sys.stderr, flush=True)
             app = _orig(*args, **kwargs)
+            print(f"[DIAG] original {_name} returned: {type(app)}", file=sys.stderr, flush=True)
             if app:
-                logger.debug(
-                    "Original %s returned app: %s. Adding AuthInjectionMiddleware.",
-                    _name,
-                    type(app),
-                )
                 setup_starlette_middleware(app)
             else:
-                logger.error("Original %s returned None.", _name)
+                print(f"[DIAG] original {_name} returned None!", file=sys.stderr, flush=True)
             return app
 
         setattr(mcp_server, method_name, new_patched_app_provider_method)
@@ -404,23 +402,22 @@ class AuthInjectionMiddleware:
 
 
 def setup_starlette_middleware(app):
-    """Install AuthInjectionMiddleware as a raw ASGI wrapper.
+    """Install AuthInjectionMiddleware as a raw ASGI wrapper."""
+    import sys
+    print(f"[DIAG] setup_starlette_middleware called, app={type(app)}", file=sys.stderr, flush=True)
+    print(f"[DIAG] app has build_middleware_stack: {hasattr(app, 'build_middleware_stack')}", file=sys.stderr, flush=True)
+    print(f"[DIAG] app.middleware_stack before: {app.middleware_stack}", file=sys.stderr, flush=True)
 
-    We force-build Starlette's middleware stack and then wrap it with
-    our ASGI middleware. This ensures ContextVars propagate correctly
-    (unlike BaseHTTPMiddleware which runs call_next in a separate task).
-    """
     if not app:
-        logger.error("Cannot setup middleware, app is None.")
         return
 
     # Force Starlette to build its internal middleware stack now
     if hasattr(app, "build_middleware_stack"):
         app.middleware_stack = app.build_middleware_stack()
-        logger.debug("Forced middleware stack build: %s", type(app.middleware_stack))
+        print(f"[DIAG] middleware_stack after build: {type(app.middleware_stack)}", file=sys.stderr, flush=True)
 
     if app.middleware_stack is not None:
         app.middleware_stack = AuthInjectionMiddleware(app.middleware_stack)
-        logger.info("AuthInjectionMiddleware wrapping middleware_stack successfully.")
+        print(f"[DIAG] AuthInjectionMiddleware installed!", file=sys.stderr, flush=True)
     else:
-        logger.error("middleware_stack is None — cannot install AuthInjectionMiddleware")
+        print(f"[DIAG] middleware_stack is STILL None!", file=sys.stderr, flush=True)
