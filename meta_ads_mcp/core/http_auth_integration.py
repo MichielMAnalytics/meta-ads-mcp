@@ -260,92 +260,114 @@ def setup_fastmcp_http_auth(mcp_server):
 
 
 # ---------------------------------------------------------------------------
-# Starlette middleware
+# Raw ASGI middleware
+# ---------------------------------------------------------------------------
+#
+# IMPORTANT: We use a raw ASGI middleware instead of Starlette's
+# BaseHTTPMiddleware because the latter runs ``call_next`` in a separate
+# thread/task, which breaks ContextVar propagation. With a raw ASGI
+# middleware the downstream app runs in the SAME task, so ContextVars
+# set here are visible inside FastMCP tool handlers.
 # ---------------------------------------------------------------------------
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
+
+# Paths handled directly (OAuth 2.1 discovery)
+_OAUTH_PATHS = {
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/mcp/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-authorization-server/mcp",
+    "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/mcp",
+    "/mcp/.well-known/openid-configuration",
+}
 
 
-class AuthInjectionMiddleware(BaseHTTPMiddleware):
-    """Extract auth tokens from HTTP headers and store in ContextVars.
+class AuthInjectionMiddleware:
+    """Raw ASGI middleware that extracts auth tokens from HTTP headers,
+    stores them in ContextVars, and handles OAuth discovery endpoints.
 
-    Also validates the Bearer token against the Rule1 API and stores
-    the org context for downstream use.
-
-    Handles OAuth 2.1 discovery endpoints directly (before FastMCP routing)
-    since injecting Starlette routes into FastMCP's app doesn't work reliably.
+    Unlike Starlette's BaseHTTPMiddleware this does NOT create a
+    separate task for the downstream app, so ContextVars propagate
+    correctly into FastMCP tool handlers.
     """
 
-    # Paths that this middleware handles directly (OAuth 2.1 discovery)
-    _OAUTH_PATHS = {
-        "/.well-known/oauth-protected-resource",
-        "/.well-known/oauth-protected-resource/mcp",
-        "/mcp/.well-known/oauth-protected-resource",
-        "/.well-known/oauth-authorization-server",
-        "/.well-known/oauth-authorization-server/mcp",
-        "/.well-known/openid-configuration",
-        "/.well-known/openid-configuration/mcp",
-        "/mcp/.well-known/openid-configuration",
-    }
+    def __init__(self, app):
+        self.app = app
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Build a Starlette Request for convenience (read-only, no cost)
+        request = Request(scope, receive)
         path = request.url.path.rstrip("/")
-        logger.debug("HTTP Auth Middleware: Processing request to %s", path)
+        method = request.method
 
-        # Handle OAuth discovery endpoints directly
-        if path in self._OAUTH_PATHS:
-            from .oauth_metadata import protected_resource_metadata, auth_server_metadata, cors_preflight
-            if request.method == "OPTIONS":
-                return await cors_preflight(request)
-            if "oauth-protected-resource" in path:
-                return await protected_resource_metadata(request)
-            # Both oauth-authorization-server and openid-configuration
-            return await auth_server_metadata(request)
+        # --- OAuth discovery endpoints (handled directly) ----------------
+        if path in _OAUTH_PATHS:
+            from .oauth_metadata import (
+                protected_resource_metadata,
+                auth_server_metadata,
+                cors_preflight,
+            )
+            if method == "OPTIONS":
+                resp = await cors_preflight(request)
+            elif "oauth-protected-resource" in path:
+                resp = await protected_resource_metadata(request)
+            else:
+                resp = await auth_server_metadata(request)
+            await resp(scope, receive, send)
+            return
 
         if path == "/register":
             from .oauth_metadata import register_client, cors_preflight
-            if request.method == "OPTIONS":
-                return await cors_preflight(request)
-            return await register_client(request)
+            if method == "OPTIONS":
+                resp = await cors_preflight(request)
+            else:
+                resp = await register_client(request)
+            await resp(scope, receive, send)
+            return
 
-        headers = dict(request.headers)
+        # --- Extract auth tokens from headers ----------------------------
+        headers = {
+            k.decode("latin-1"): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
 
-        # Extract Bearer token (Rule1 / Clerk JWT / pgs_xxx)
         bearer_token = FastMCPAuthIntegration.extract_token_from_headers(headers)
-
-        # Extract direct Meta token (escape hatch)
         direct_meta = FastMCPAuthIntegration.extract_direct_meta_token_from_headers(headers)
 
         if bearer_token:
-            logger.debug("HTTP Auth Middleware: Extracted Bearer token: %s...", bearer_token[:10])
+            logger.debug("ASGI Auth: Bearer token: %s...", bearer_token[:10])
             FastMCPAuthIntegration.set_auth_token(bearer_token)
-
-            # Validate the Bearer token against Rule1 API
             try:
                 org_ctx = await rule1_auth.validate_token(bearer_token)
                 FastMCPAuthIntegration.set_org_context(org_ctx)
-                logger.debug("HTTP Auth Middleware: Org context validated")
             except Exception as exc:
-                logger.warning("HTTP Auth Middleware: Token validation failed: %s", exc)
-                # We still allow the request through -- individual tools will
-                # fail with a clear error if they need a valid token.
+                logger.warning("ASGI Auth: Token validation failed: %s", exc)
 
         if direct_meta:
-            logger.debug("HTTP Auth Middleware: Extracted direct Meta token: %s...", direct_meta[:10])
+            logger.debug("ASGI Auth: Direct Meta token: %s...", direct_meta[:10])
             FastMCPAuthIntegration.set_direct_meta_token(direct_meta)
 
+        # --- 401 challenge for unauthenticated POST /mcp -----------------
         if not bearer_token and not direct_meta:
-            logger.warning("HTTP Auth Middleware: No authentication tokens found in headers")
-            # Return 401 with WWW-Authenticate header pointing to OAuth metadata.
-            # This tells MCP clients (Claude Code, etc.) to start the OAuth flow.
-            # Only gate POST requests — GET is used for SSE stream init.
-            if path in ("/mcp", "/mcp/") and request.method == "POST":
-                from starlette.responses import Response
-                proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-                host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.hostname
-                resource_metadata_url = f"{proto}://{host}/.well-known/oauth-protected-resource"
-                return Response(
+            if path in ("/mcp", "/mcp/") and method == "POST":
+                proto = headers.get("x-forwarded-proto", request.url.scheme)
+                host = (
+                    headers.get("x-forwarded-host")
+                    or headers.get("host")
+                    or request.url.hostname
+                )
+                resource_metadata_url = (
+                    f"{proto}://{host}/.well-known/oauth-protected-resource"
+                )
+                resp = Response(
                     content="Authentication required",
                     status_code=401,
                     headers={
@@ -354,12 +376,13 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Expose-Headers": "WWW-Authenticate",
                     },
                 )
+                await resp(scope, receive, send)
+                return
 
+        # --- Call downstream (same task → ContextVars propagate) ---------
         try:
-            response = await call_next(request)
-            return response
+            await self.app(scope, receive, send)
         finally:
-            # Clear all context-scoped state
             if bearer_token:
                 FastMCPAuthIntegration.clear_auth_token()
                 FastMCPAuthIntegration.clear_org_context()
@@ -369,29 +392,12 @@ class AuthInjectionMiddleware(BaseHTTPMiddleware):
 
 
 def setup_starlette_middleware(app):
-    """Add AuthInjectionMiddleware and OAuth routes to the Starlette app."""
+    """Wrap the Starlette app with AuthInjectionMiddleware."""
     if not app:
-        logger.error("Cannot setup Starlette middleware, app is None.")
+        logger.error("Cannot setup middleware, app is None.")
         return
 
-    # Add OAuth 2.1 discovery routes (RFC 9728 / RFC 8414)
-    try:
-        from .oauth_metadata import add_oauth_routes
-        add_oauth_routes(app)
-    except Exception as e:
-        logger.error("Failed to add OAuth metadata routes: %s", e, exc_info=True)
-
-    already_added = any(
-        mw.cls == AuthInjectionMiddleware for mw in app.user_middleware
-    )
-
-    if not already_added:
-        try:
-            app.add_middleware(AuthInjectionMiddleware)
-            logger.info("AuthInjectionMiddleware added to Starlette app successfully.")
-        except Exception as e:
-            logger.error(
-                "Failed to add AuthInjectionMiddleware to Starlette app: %s", e, exc_info=True
-            )
-    else:
-        logger.debug("AuthInjectionMiddleware already present in Starlette app.")
+    # Wrap the ASGI app directly (no add_middleware — that requires
+    # BaseHTTPMiddleware subclasses).
+    app.middleware_stack = AuthInjectionMiddleware(app.middleware_stack)
+    logger.info("AuthInjectionMiddleware (raw ASGI) installed successfully.")
