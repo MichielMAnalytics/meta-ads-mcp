@@ -61,7 +61,25 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
     # If no explicit access_token, try to list accounts from Rule1 API
     if not access_token:
         try:
-            from .http_auth_integration import FastMCPAuthIntegration
+            import asyncio
+            from .http_auth_integration import FastMCPAuthIntegration, _auth_token, _direct_meta_token
+
+            # --- DIAGNOSTIC LOGGING ---
+            task = asyncio.current_task()
+            task_name = task.get_name() if task else "NO_TASK"
+            cv_bearer = _auth_token.get(None)
+            cv_direct = _direct_meta_token.get(None)
+            logger.warning(
+                "get_ad_accounts DIAG: task=%s, cv_bearer=%s, cv_direct=%s, "
+                "get_auth_token()=%s, get_direct_meta_token()=%s",
+                task_name,
+                cv_bearer[:15] + "..." if cv_bearer else None,
+                cv_direct[:15] + "..." if cv_direct else None,
+                (FastMCPAuthIntegration.get_auth_token() or "")[:15] or None,
+                (FastMCPAuthIntegration.get_direct_meta_token() or "")[:15] or None,
+            )
+            # --- END DIAGNOSTIC ---
+
             from . import rule1_auth
 
             # Check for direct Meta token first

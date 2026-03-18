@@ -343,8 +343,20 @@ class AuthInjectionMiddleware:
         direct_meta = FastMCPAuthIntegration.extract_direct_meta_token_from_headers(headers)
 
         if bearer_token:
-            logger.debug("ASGI Auth: Bearer token: %s...", bearer_token[:10])
+            import asyncio
+            task = asyncio.current_task()
+            task_name = task.get_name() if task else "NO_TASK"
+            logger.warning(
+                "ASGI Auth DIAG: setting bearer=%s... task=%s cv_before=%s",
+                bearer_token[:15],
+                task_name,
+                _auth_token.get(None) is not None,
+            )
             FastMCPAuthIntegration.set_auth_token(bearer_token)
+            logger.warning(
+                "ASGI Auth DIAG: cv_after_set=%s",
+                _auth_token.get(None) is not None,
+            )
             try:
                 org_ctx = await rule1_auth.validate_token(bearer_token)
                 FastMCPAuthIntegration.set_org_context(org_ctx)
