@@ -200,7 +200,8 @@ async def list_ad_accounts(bearer_token: str, organization_id: Optional[str] = N
     if not bearer_token:
         raise ValueError("Bearer token is empty")
 
-    cached = _accounts_cache.get(bearer_token)
+    cache_key = f"{bearer_token}:{organization_id or 'default'}"
+    cached = _accounts_cache.get(cache_key)
     if cached is not None:
         logger.debug("list_ad_accounts: returning cached account list")
         return cached
@@ -225,7 +226,7 @@ async def list_ad_accounts(bearer_token: str, organization_id: Optional[str] = N
                 accounts = data
             else:
                 accounts = data.get("accounts", [])
-            _accounts_cache.set(bearer_token, accounts, _ACCOUNTS_CACHE_TTL)
+            _accounts_cache.set(cache_key, accounts, _ACCOUNTS_CACHE_TTL)
             logger.info("list_ad_accounts: retrieved %d accounts", len(accounts))
             return accounts
 
