@@ -27,7 +27,7 @@ if ENABLE_REPORT_GENERATION:
         """
         Generate comprehensive Meta Ads performance reports.
 
-        **This is a premium feature available with Pipeboard Pro.**
+        **This is a premium feature.**
         
         Args:
             account_id: Meta Ads account ID (format: act_XXXXXXXXX)
@@ -81,8 +81,8 @@ if ENABLE_REPORT_GENERATION:
                     "Creative performance insights",
                     "Automated scheduling options"
                 ],
-                "upgrade_url": "https://pipeboard.co/upgrade",
-                "contact_email": "info@pipeboard.co",
+                "upgrade_url": "https://app.rule1.ai/upgrade",
+                "contact_email": "info@rule1.ai",
                 "early_access": "Contact us for early access and special pricing"
             },
             "request_parameters": {

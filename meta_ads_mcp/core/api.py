@@ -2,15 +2,13 @@
 
 from typing import Any, Dict, Optional, Callable
 import json
-import hmac
-import hashlib
 import httpx
 import asyncio
 import functools
 import os
 from . import auth
-from .auth import needs_authentication, auth_manager, start_callback_server, shutdown_callback_server
 from .utils import logger
+
 
 class McpToolError(Exception):
     """Base class for MCP tool errors that must set isError: true.
@@ -30,9 +28,8 @@ USER_AGENT = "meta-ads-mcp/1.0"
 
 # Log key environment and configuration at startup
 logger.info("Core API module initialized")
-logger.info(f"Graph API Version: {META_GRAPH_API_VERSION}")
-logger.info(f"META_APP_ID env var present: {'Yes' if os.environ.get('META_APP_ID') else 'No'}")
-logger.info(f"META_APP_SECRET env var present (appsecret_proof will be {'enabled' if os.environ.get('META_APP_SECRET') else 'disabled'})")
+logger.info("Graph API Version: %s", META_GRAPH_API_VERSION)
+
 
 class GraphAPIError(Exception):
     """Exception raised for errors from the Graph API."""
@@ -40,21 +37,26 @@ class GraphAPIError(Exception):
         self.error_data = error_data
         self.message = error_data.get('message', 'Unknown Graph API error')
         super().__init__(self.message)
-        
-        # Log error details
-        logger.error(f"Graph API Error: {self.message}")
-        logger.debug(f"Error details: {error_data}")
-        
+
+        logger.error("Graph API Error: %s", self.message)
+        logger.debug("Error details: %s", error_data)
+
         # Check if this is an auth error (code 4 is rate limiting, NOT auth)
         if "code" in error_data and error_data["code"] in [190, 102]:
-            logger.warning(f"Auth error detected (code: {error_data['code']}). Invalidating token.")
-            auth_manager.invalidate_token()
+            logger.warning(
+                "Auth error detected (code: %s). Invalidating token.",
+                error_data["code"],
+            )
+            auth.invalidate_token()
         elif "code" in error_data and error_data["code"] == 4:
-            logger.warning(f"Rate limit error detected (code: 4, subcode: {error_data.get('error_subcode', 'N/A')}). Token is still valid — NOT invalidating.")
+            logger.warning(
+                "Rate limit error detected (code: 4, subcode: %s). Token still valid.",
+                error_data.get("error_subcode", "N/A"),
+            )
 
 
 def _log_meta_rate_limit_headers(headers: dict, endpoint: str) -> None:
-    """Log Meta's rate limit headers for observability (X-App-Usage, X-Business-Use-Case-Usage)."""
+    """Log Meta's rate limit headers for observability."""
     app_usage = headers.get("x-app-usage")
     biz_usage = headers.get("x-business-use-case-usage")
     ad_account_usage = headers.get("x-ad-account-usage")
@@ -87,325 +89,290 @@ def _log_meta_rate_limit_headers(headers: dict, endpoint: str) -> None:
                         break
 
         log_fn = logger.warning if is_high else logger.info
-        log_fn(f"meta_rate_limit_usage endpoint={endpoint} {json.dumps(usage_data)}")
+        log_fn("meta_rate_limit_usage endpoint=%s %s", endpoint, json.dumps(usage_data))
 
 
 async def make_api_request(
     endpoint: str,
     access_token: str,
     params: Optional[Dict[str, Any]] = None,
-    method: str = "GET"
+    method: str = "GET",
 ) -> Dict[str, Any]:
-    """
-    Make a request to the Meta Graph API.
-    
+    """Make a request to the Meta Graph API.
+
     Args:
         endpoint: API endpoint path (without base URL)
         access_token: Meta API access token
         params: Additional query parameters
         method: HTTP method (GET, POST, DELETE)
-    
+
     Returns:
         API response as a dictionary
     """
-    # Validate access token before proceeding
     if not access_token:
         logger.error("API request attempted with blank access token")
         return {
             "error": {
                 "message": "Authentication Required",
                 "details": "A valid access token is required to access the Meta API",
-                "action_required": "Please authenticate first"
+                "action_required": "Please authenticate first",
             }
         }
-        
+
     url = f"{META_GRAPH_API_BASE}/{endpoint}"
-    
+
     headers = {
         "User-Agent": USER_AGENT,
     }
-    
+
     request_params = params or {}
     request_params["access_token"] = access_token
 
-    # Add appsecret_proof when META_APP_SECRET is configured.
-    # Required for system user tokens and recommended by Meta for all
-    # server-to-server API calls to verify token authenticity.
-    # See: https://developers.facebook.com/docs/graph-api/securing-requests/
-    app_secret = os.environ.get("META_APP_SECRET", "")
-    if app_secret and access_token:
-        request_params["appsecret_proof"] = hmac.new(
-            app_secret.encode("utf-8"),
-            access_token.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-
     # Logging the request (masking token for security)
-    masked_params = {k: "***MASKED***" if k in ("access_token", "appsecret_proof") else v for k, v in request_params.items()}
-    logger.debug(f"API Request: {method} {url}")
-    logger.debug(f"Request params: {masked_params}")
-    
-    # Check for app_id in params
-    app_id = auth_manager.app_id
-    logger.debug(f"Current app_id from auth_manager: {app_id}")
-    
+    masked_params = {
+        k: "***MASKED***" if k in ("access_token", "appsecret_proof") else v
+        for k, v in request_params.items()
+    }
+    logger.debug("API Request: %s %s", method, url)
+    logger.debug("Request params: %s", masked_params)
+
     async with httpx.AsyncClient() as client:
         try:
             if method == "GET":
-                # For GET, JSON-encode dict/list params (e.g., targeting_spec) to proper strings
                 encoded_params = {}
                 for key, value in request_params.items():
                     if isinstance(value, (dict, list)):
                         encoded_params[key] = json.dumps(value)
                     else:
                         encoded_params[key] = value
-                response = await client.get(url, params=encoded_params, headers=headers, timeout=30.0)
+                response = await client.get(
+                    url, params=encoded_params, headers=headers, timeout=30.0
+                )
             elif method == "POST":
-                # For Meta API, POST requests need data, not JSON
-                if 'targeting' in request_params and isinstance(request_params['targeting'], dict):
-                    # Convert targeting dict to string for the API
-                    request_params['targeting'] = json.dumps(request_params['targeting'])
-                
-                # Convert lists and dicts to JSON strings    
+                if "targeting" in request_params and isinstance(
+                    request_params["targeting"], dict
+                ):
+                    request_params["targeting"] = json.dumps(
+                        request_params["targeting"]
+                    )
+
                 for key, value in request_params.items():
                     if isinstance(value, (list, dict)):
                         request_params[key] = json.dumps(value)
-                
-                logger.debug(f"POST params (prepared): {masked_params}")
-                response = await client.post(url, data=request_params, headers=headers, timeout=30.0)
+
+                logger.debug("POST params (prepared): %s", masked_params)
+                response = await client.post(
+                    url, data=request_params, headers=headers, timeout=30.0
+                )
             elif method == "DELETE":
-                response = await client.delete(url, params=request_params, headers=headers, timeout=30.0)
+                response = await client.delete(
+                    url, params=request_params, headers=headers, timeout=30.0
+                )
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
-            
-            response.raise_for_status()
-            logger.debug(f"API Response status: {response.status_code}")
 
-            # Log Meta rate limit headers for observability
+            response.raise_for_status()
+            logger.debug("API Response status: %s", response.status_code)
+
             _log_meta_rate_limit_headers(response.headers, endpoint)
 
-            # Ensure the response is JSON and return it as a dictionary
             try:
                 return response.json()
             except json.JSONDecodeError:
-                # If not JSON, return text content in a structured format
                 return {
                     "text_response": response.text,
-                    "status_code": response.status_code
+                    "status_code": response.status_code,
                 }
-        
+
         except httpx.HTTPStatusError as e:
             error_info = {}
             try:
                 error_info = e.response.json()
-            except:
-                error_info = {"status_code": e.response.status_code, "text": e.response.text}
-            
-            logger.error(f"HTTP Error: {e.response.status_code} - {error_info}")
+            except Exception:
+                error_info = {
+                    "status_code": e.response.status_code,
+                    "text": e.response.text,
+                }
 
-            # Log Meta rate limit headers even on errors
+            logger.error("HTTP Error: %s - %s", e.response.status_code, error_info)
+
             _log_meta_rate_limit_headers(e.response.headers, endpoint)
 
-            # Check for rate limit errors vs authentication errors.
-            # Code 4 is a rate limit (NOT auth) — do NOT invalidate token.
             if "error" in error_info:
                 error_obj = error_info.get("error", {})
-                error_code = error_obj.get("code") if isinstance(error_obj, dict) else None
+                error_code = (
+                    error_obj.get("code") if isinstance(error_obj, dict) else None
+                )
 
                 if error_code == 4:
-                    # Application-level rate limit — token is still valid
                     logger.warning(
-                        f"Facebook API rate limit (code=4, subcode={error_obj.get('error_subcode', 'N/A')}, "
-                        f"msg={error_obj.get('error_user_msg', error_obj.get('message', 'N/A'))}). "
-                        f"Token is still valid — NOT invalidating."
+                        "Facebook API rate limit (code=4, subcode=%s). Token still valid.",
+                        error_obj.get("error_subcode", "N/A"),
                     )
                 elif error_code in [190, 102, 200, 10]:
-                    logger.warning(f"Detected Facebook API auth error: {error_code}")
-                    if error_code == 200 and "Provide valid app ID" in error_obj.get("message", ""):
+                    logger.warning(
+                        "Detected Facebook API auth error: %s", error_code
+                    )
+                    if error_code == 200 and "Provide valid app ID" in error_obj.get(
+                        "message", ""
+                    ):
                         logger.error("Meta API authentication configuration issue")
-                        logger.error(f"Current app_id: {app_id}")
                         return {
                             "error": {
-                                "message": "Meta API authentication configuration issue. Please check your app credentials.",
+                                "message": "Meta API authentication configuration issue.",
                                 "original_error": error_obj.get("message"),
-                                "code": error_code
+                                "code": error_code,
                             }
                         }
-                    auth_manager.invalidate_token()
+                    auth.invalidate_token()
                 elif e.response.status_code in [401, 403]:
-                    logger.warning(f"Detected authentication error ({e.response.status_code})")
-                    auth_manager.invalidate_token()
+                    logger.warning(
+                        "Detected authentication error (%s)",
+                        e.response.status_code,
+                    )
+                    auth.invalidate_token()
             elif e.response.status_code in [401, 403]:
-                logger.warning(f"Detected authentication error ({e.response.status_code})")
-                auth_manager.invalidate_token()
-            
-            # Include full details for technical users
+                logger.warning(
+                    "Detected authentication error (%s)", e.response.status_code
+                )
+                auth.invalidate_token()
+
             full_response = {
                 "headers": dict(e.response.headers),
                 "status_code": e.response.status_code,
                 "url": str(e.response.url),
                 "reason": getattr(e.response, "reason_phrase", "Unknown reason"),
                 "request_method": e.request.method,
-                "request_url": str(e.request.url)
+                "request_url": str(e.request.url),
             }
-            
-            # Return a properly structured error object
+
             return {
                 "error": {
                     "message": f"HTTP Error: {e.response.status_code}",
                     "details": error_info,
-                    "full_response": full_response
+                    "full_response": full_response,
                 }
             }
-        
+
         except Exception as e:
-            logger.error(f"Request Error: {str(e)}")
+            logger.error("Request Error: %s", str(e))
             return {"error": {"message": str(e)}}
 
 
+# ---------------------------------------------------------------------------
 # Generic wrapper for all Meta API tools
+# ---------------------------------------------------------------------------
+
+
 def meta_api_tool(func):
-    """Decorator for Meta API tools that handles authentication and error handling."""
+    """Decorator for Meta API tools that handles authentication and error handling.
+
+    Authentication resolution order:
+    1. Explicit ``access_token`` kwarg (escape hatch)
+    2. Direct Meta token from X-META-ACCESS-TOKEN header (via ContextVar)
+    3. Rule1 Bearer token + account_id -> fetch Meta token from Rule1 API
+    4. Base ``get_current_access_token()`` fallback (returns None in stdio)
+    """
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            # Log function call
-            logger.debug(f"Function call: {func.__name__}")
-            logger.debug(f"Args: {args}")
-            # Log kwargs without sensitive info
-            safe_kwargs = {k: ('***TOKEN***' if k == 'access_token' else v) for k, v in kwargs.items()}
-            logger.debug(f"Kwargs: {safe_kwargs}")
-            
-            # Log app ID information
-            app_id = auth_manager.app_id
-            logger.debug(f"Current app_id: {app_id}")
-            logger.debug(f"META_APP_ID env var: {os.environ.get('META_APP_ID')}")
-            
-            # If access_token is not in kwargs or not kwargs['access_token'], try to get it from auth_manager
-            if 'access_token' not in kwargs or not kwargs['access_token']:
-                try:
-                    access_token = await auth.get_current_access_token()
-                    if access_token:
-                        kwargs['access_token'] = access_token
-                        logger.debug("Using access token from auth_manager")
-                    else:
-                        logger.warning("No access token available from auth_manager")
-                        # Add more details about why token might be missing
-                        if (auth_manager.app_id == "YOUR_META_APP_ID" or not auth_manager.app_id) and not auth_manager.use_pipeboard:
-                            logger.error("TOKEN VALIDATION FAILED: No valid app_id configured")
-                            logger.error("Please set META_APP_ID environment variable or configure in your code")
-                        elif auth_manager.use_pipeboard:
-                            logger.error("TOKEN VALIDATION FAILED: Pipeboard authentication enabled but no valid token available")
-                            logger.error("Complete authentication via Pipeboard service or check PIPEBOARD_API_TOKEN")
-                        else:
-                            logger.error("Check logs above for detailed token validation failures")
-                except Exception as e:
-                    logger.error(f"Error getting access token: {str(e)}")
-                    # Add stack trace for better debugging
-                    import traceback
-                    logger.error(f"Stack trace: {traceback.format_exc()}")
-            
-            # Final validation - if we still don't have a valid token, return authentication required
-            if 'access_token' not in kwargs or not kwargs['access_token']:
-                logger.warning("No access token available, authentication needed")
-                
-                # Add more specific troubleshooting information
-                auth_url = auth_manager.get_auth_url()
-                app_id = auth_manager.app_id
-                using_pipeboard = auth_manager.use_pipeboard
-                
-                logger.error("TOKEN VALIDATION SUMMARY:")
-                logger.error(f"- Current app_id: '{app_id}'")
-                logger.error(f"- Environment META_APP_ID: '{os.environ.get('META_APP_ID', 'Not set')}'")
-                logger.error(f"- Pipeboard API token configured: {'Yes' if os.environ.get('PIPEBOARD_API_TOKEN') else 'No'}")
-                logger.error(f"- Using Pipeboard authentication: {'Yes' if using_pipeboard else 'No'}")
-                
-                # Check for common configuration issues - but only if not using Pipeboard
-                if not using_pipeboard and (app_id == "YOUR_META_APP_ID" or not app_id):
-                    logger.error("ISSUE DETECTED: No valid Meta App ID configured")
-                    logger.error("ACTION REQUIRED: Set META_APP_ID environment variable with a valid App ID")
-                elif using_pipeboard:
-                    logger.error("ISSUE DETECTED: Pipeboard authentication configured but no valid token available")
-                    logger.error("ACTION REQUIRED: Complete authentication via Pipeboard service")
-                
-                # Provide different guidance based on authentication method
-                if using_pipeboard:
-                    return json.dumps({
-                        "error": {
-                            "message": "Pipeboard Authentication Required",
-                            "details": {
-                                "description": "Your Pipeboard API token is invalid or has expired",
-                                "action_required": "Update your Pipeboard token",
-                                "setup_url": "https://pipeboard.co/setup",
-                                "token_url": "https://pipeboard.co/api-tokens",
-                                "configuration_status": {
-                                    "app_id_configured": bool(app_id) and app_id != "YOUR_META_APP_ID",
-                                    "pipeboard_enabled": True,
-                                },
-                                "troubleshooting": "Go to https://pipeboard.co/setup to verify your account setup, then visit https://pipeboard.co/api-tokens to obtain a new API token",
-                                "setup_link": "[Verify your Pipeboard account setup](https://pipeboard.co/setup)",
-                                "token_link": "[Get a new Pipeboard API token](https://pipeboard.co/api-tokens)"
-                            }
-                        }
-                    }, indent=2)
+            logger.debug("Function call: %s", func.__name__)
+            safe_kwargs = {
+                k: ("***TOKEN***" if k == "access_token" else v)
+                for k, v in kwargs.items()
+            }
+            logger.debug("Kwargs: %s", safe_kwargs)
+
+            # If access_token is not provided, resolve it
+            if "access_token" not in kwargs or not kwargs["access_token"]:
+                # Import here to avoid circular imports at module level
+                from .http_auth_integration import FastMCPAuthIntegration
+                from . import rule1_auth as _rule1_auth
+
+                # Check for direct Meta token first
+                direct_meta = FastMCPAuthIntegration.get_direct_meta_token()
+                if direct_meta:
+                    kwargs["access_token"] = direct_meta
+                    logger.debug("Using direct Meta token from X-META-ACCESS-TOKEN header")
                 else:
-                    return json.dumps({
+                    # Try Rule1 Bearer token path
+                    bearer = FastMCPAuthIntegration.get_auth_token()
+                    if bearer:
+                        # Extract account_id from tool kwargs
+                        account_id = kwargs.get("account_id")
+                        if account_id:
+                            # Set ContextVar so get_current_access_token can also use it
+                            FastMCPAuthIntegration.set_current_account_id(account_id)
+                            try:
+                                meta_token = await _rule1_auth.get_meta_token(
+                                    bearer, account_id
+                                )
+                                kwargs["access_token"] = meta_token
+                                logger.debug(
+                                    "Using Meta token from Rule1 for account %s",
+                                    account_id,
+                                )
+                            except Exception as exc:
+                                logger.error(
+                                    "Failed to get Meta token via Rule1: %s", exc
+                                )
+                                # Fall through to get_current_access_token
+                        else:
+                            logger.debug(
+                                "Bearer token present but no account_id in kwargs"
+                            )
+
+                    # If still no token, try the patched get_current_access_token
+                    if "access_token" not in kwargs or not kwargs.get("access_token"):
+                        try:
+                            access_token = await auth.get_current_access_token()
+                            if access_token:
+                                kwargs["access_token"] = access_token
+                                logger.debug("Using access token from get_current_access_token")
+                            else:
+                                logger.warning("No access token available")
+                        except Exception as e:
+                            logger.error("Error getting access token: %s", e)
+
+            # Final validation
+            if "access_token" not in kwargs or not kwargs["access_token"]:
+                logger.warning("No access token available, authentication needed")
+                return json.dumps(
+                    {
                         "error": {
                             "message": "Authentication Required",
                             "details": {
-                                "description": "You need to authenticate with the Meta API before using this tool",
-                                "action_required": "Please authenticate first",
-                                "auth_url": auth_url,
-                                "configuration_status": {
-                                    "app_id_configured": bool(app_id) and app_id != "YOUR_META_APP_ID",
-                                    "pipeboard_enabled": False,
-                                },
-                                "troubleshooting": "Check logs for TOKEN VALIDATION FAILED messages",
-                                "markdown_link": f"[Click here to authenticate with Meta Ads API]({auth_url})"
-                            }
+                                "description": "A valid access token is required",
+                                "action_required": "Provide a Bearer token (Clerk JWT or pgs_xxx) in the Authorization header",
+                                "alternative": "Or provide a direct Meta token via X-META-ACCESS-TOKEN header",
+                            },
                         }
-                    }, indent=2)
-                
+                    },
+                    indent=2,
+                )
+
             # Call the original function
             result = await func(*args, **kwargs)
-            
+
             # If the result is a string (JSON), try to parse it to check for errors
             if isinstance(result, str):
                 try:
                     result_dict = json.loads(result)
                     if "error" in result_dict:
-                        logger.error(f"Error in API response: {result_dict['error']}")
-                        # If this is an app ID error, log more details
-                        if isinstance(result_dict.get("details", {}).get("error", {}), dict):
-                            error_obj = result_dict["details"]["error"]
-                            if error_obj.get("code") == 200 and "Provide valid app ID" in error_obj.get("message", ""):
-                                logger.error("Meta API authentication configuration issue")
-                                logger.error(f"Current app_id: {app_id}")
-                                # Replace the confusing error with a more user-friendly one
-                                return json.dumps({
-                                    "error": {
-                                        "message": "Meta API Configuration Issue",
-                                        "details": {
-                                            "description": "Your Meta API app is not properly configured",
-                                            "action_required": "Check your META_APP_ID environment variable",
-                                            "current_app_id": app_id,
-                                            "original_error": error_obj.get("message")
-                                        }
-                                    }
-                                }, indent=2)
+                        logger.error("Error in API response: %s", result_dict["error"])
                 except Exception:
-                    # Not JSON or other parsing error, wrap it in a dictionary
                     return json.dumps({"data": result}, indent=2)
-            
+
             # If result is already a dictionary, ensure it's properly serialized
             if isinstance(result, dict):
                 return json.dumps(result, indent=2)
-            
+
             return result
         except McpToolError:
             raise  # Let FastMCP set isError: true and refund the usage credit
         except Exception as e:
-            logger.error(f"Error in {func.__name__}: {str(e)}")
+            logger.error("Error in %s: %s", func.__name__, str(e))
             return json.dumps({"error": str(e)}, indent=2)
 
-    return wrapper 
+    return wrapper

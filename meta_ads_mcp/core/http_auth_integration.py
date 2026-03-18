@@ -3,305 +3,339 @@ FastMCP HTTP Authentication Integration for Meta Ads MCP
 
 This module provides direct integration with FastMCP to inject authentication
 from HTTP headers into the tool execution context.
+
+Auth flow (Rule1):
+1. Extract Bearer token (Clerk JWT or pgs_xxx) from Authorization header
+2. Validate it against the Rule1 API, store org context
+3. When a tool needs a Meta token, fetch it via Rule1 API using the
+   Bearer token + account_id
 """
 
-import asyncio
 import contextvars
 from typing import Optional
 from .utils import logger
-import json
+from . import rule1_auth
 
-# Use context variables instead of thread-local storage for better async support
-_auth_token: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('auth_token', default=None)
-_pipeboard_token: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('pipeboard_token', default=None)
+# ---------------------------------------------------------------------------
+# Context variables
+# ---------------------------------------------------------------------------
+
+# The Rule1 Bearer token (Clerk JWT or pgs_xxx system token)
+_auth_token: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "auth_token", default=None
+)
+
+# Direct Meta access token passed via X-META-ACCESS-TOKEN header (escape hatch)
+_direct_meta_token: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "direct_meta_token", default=None
+)
+
+# Validated org context from Rule1 API
+_org_context: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
+    "org_context", default=None
+)
+
+# The account_id currently being operated on (set by meta_api_tool decorator)
+_current_account_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "current_account_id", default=None
+)
+
 
 class FastMCPAuthIntegration:
     """Direct integration with FastMCP for HTTP authentication"""
-    
+
+    # -- Bearer / Rule1 token ------------------------------------------------
+
     @staticmethod
     def set_auth_token(token: str) -> None:
-        """Set authentication token for the current context
-        
-        Args:
-            token: Access token to use for this request
-        """
+        """Set the Rule1 Bearer token for the current context."""
         _auth_token.set(token)
-    
+
     @staticmethod
     def get_auth_token() -> Optional[str]:
-        """Get authentication token for the current context
-        
-        Returns:
-            Access token if set, None otherwise
-        """
+        """Get the Rule1 Bearer token for the current context."""
         return _auth_token.get(None)
-    
-    @staticmethod
-    def set_pipeboard_token(token: str) -> None:
-        """Set Pipeboard token for the current context
-        
-        Args:
-            token: Pipeboard API token to use for this request
-        """
-        _pipeboard_token.set(token)
-    
-    @staticmethod
-    def get_pipeboard_token() -> Optional[str]:
-        """Get Pipeboard token for the current context
-        
-        Returns:
-            Pipeboard token if set, None otherwise
-        """
-        return _pipeboard_token.get(None)
-    
+
     @staticmethod
     def clear_auth_token() -> None:
-        """Clear authentication token for the current context"""
+        """Clear the Rule1 Bearer token for the current context."""
         _auth_token.set(None)
-    
+
+    # -- Direct Meta token (X-META-ACCESS-TOKEN header) ----------------------
+
     @staticmethod
-    def clear_pipeboard_token() -> None:
-        """Clear Pipeboard token for the current context"""
-        _pipeboard_token.set(None)
-    
+    def set_direct_meta_token(token: str) -> None:
+        """Set a direct Meta access token for the current context."""
+        _direct_meta_token.set(token)
+
+    @staticmethod
+    def get_direct_meta_token() -> Optional[str]:
+        """Get the direct Meta access token for the current context."""
+        return _direct_meta_token.get(None)
+
+    @staticmethod
+    def clear_direct_meta_token() -> None:
+        """Clear the direct Meta access token for the current context."""
+        _direct_meta_token.set(None)
+
+    # -- Org context ---------------------------------------------------------
+
+    @staticmethod
+    def set_org_context(ctx: dict) -> None:
+        _org_context.set(ctx)
+
+    @staticmethod
+    def get_org_context() -> Optional[dict]:
+        return _org_context.get(None)
+
+    @staticmethod
+    def clear_org_context() -> None:
+        _org_context.set(None)
+
+    # -- Current account id --------------------------------------------------
+
+    @staticmethod
+    def set_current_account_id(account_id: str) -> None:
+        _current_account_id.set(account_id)
+
+    @staticmethod
+    def get_current_account_id() -> Optional[str]:
+        return _current_account_id.get(None)
+
+    @staticmethod
+    def clear_current_account_id() -> None:
+        _current_account_id.set(None)
+
+    # -- Header extraction ---------------------------------------------------
+
     @staticmethod
     def extract_token_from_headers(headers: dict) -> Optional[str]:
-        """Extract token from HTTP headers
-        
-        Args:
-            headers: HTTP request headers
-            
-        Returns:
-            Token if found, None otherwise
+        """Extract Bearer token from Authorization header.
+
+        Returns the Bearer token if present, None otherwise.
         """
-        # Check for Bearer token in Authorization header (primary method)
-        auth_header = headers.get('Authorization') or headers.get('authorization')
-        if auth_header and auth_header.lower().startswith('bearer '):
+        auth_header = headers.get("Authorization") or headers.get("authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
             logger.debug("Found Bearer token in Authorization header")
             return token
-        
-        # Check for direct Meta access token
-        meta_token = headers.get('X-META-ACCESS-TOKEN') or headers.get('x-meta-access-token')
-        if meta_token:
-            return meta_token
-        
-        # Check for Pipeboard token (legacy support, to be removed)
-        pipeboard_token = headers.get('X-PIPEBOARD-API-TOKEN') or headers.get('x-pipeboard-api-token')
-        if pipeboard_token:
-            logger.debug("Found Pipeboard token in legacy headers")
-            return pipeboard_token
-        
-        return None
-    
-    @staticmethod
-    def extract_pipeboard_token_from_headers(headers: dict) -> Optional[str]:
-        """Extract Pipeboard token from HTTP headers
-        
-        Args:
-            headers: HTTP request headers
-            
-        Returns:
-            Pipeboard token if found, None otherwise
-        """
-        # Check for Pipeboard token in X-Pipeboard-Token header (duplication API pattern)
-        pipeboard_token = headers.get('X-Pipeboard-Token') or headers.get('x-pipeboard-token')
-        if pipeboard_token:
-            logger.debug("Found Pipeboard token in X-Pipeboard-Token header")
-            return pipeboard_token
-        
-        # Check for legacy Pipeboard token header
-        legacy_token = headers.get('X-PIPEBOARD-API-TOKEN') or headers.get('x-pipeboard-api-token')
-        if legacy_token:
-            logger.debug("Found Pipeboard token in legacy X-PIPEBOARD-API-TOKEN header")
-            return legacy_token
-        
         return None
 
+    @staticmethod
+    def extract_direct_meta_token_from_headers(headers: dict) -> Optional[str]:
+        """Extract direct Meta access token from X-META-ACCESS-TOKEN header."""
+        meta_token = (
+            headers.get("X-META-ACCESS-TOKEN") or headers.get("x-meta-access-token")
+        )
+        if meta_token:
+            logger.debug("Found direct Meta token in X-META-ACCESS-TOKEN header")
+        return meta_token
+
+
+# ---------------------------------------------------------------------------
+# FastMCP server patching
+# ---------------------------------------------------------------------------
+
 def patch_fastmcp_server(mcp_server):
-    """Patch FastMCP server to inject authentication from HTTP headers
-    
-    Args:
-        mcp_server: FastMCP server instance to patch
-    """
+    """Patch FastMCP server to inject authentication from HTTP headers."""
     logger.info("Patching FastMCP server for HTTP authentication")
-    
-    # Store the original run method
+
     original_run = mcp_server.run
-    
+
     def patched_run(transport="stdio", **kwargs):
-        """Enhanced run method that sets up HTTP auth integration"""
-        logger.debug(f"Starting FastMCP with transport: {transport}")
-        
+        logger.debug("Starting FastMCP with transport: %s", transport)
         if transport == "streamable-http":
             logger.debug("Setting up HTTP authentication for streamable-http transport")
             setup_http_auth_patching()
-        
-        # Call the original run method
         return original_run(transport=transport, **kwargs)
-    
-    # Replace the run method
+
     mcp_server.run = patched_run
     logger.info("FastMCP server patching complete")
 
+
 def setup_http_auth_patching():
-    """Setup HTTP authentication patching for auth system"""
-    logger.info("Setting up HTTP authentication patching")
-    
-    # Import and patch the auth system
+    """Patch ``get_current_access_token`` so it resolves tokens via Rule1."""
+    logger.info("Setting up HTTP authentication patching (Rule1)")
+
     from . import auth
     from . import api
     from . import authentication
-    
-    # Store the original function
+
     original_get_current_access_token = auth.get_current_access_token
-    
+
     async def get_current_access_token_with_http_support() -> Optional[str]:
-        """Enhanced get_current_access_token that checks HTTP context first"""
-        
-        # Check for context-scoped token first
-        context_token = FastMCPAuthIntegration.get_auth_token()
-        if context_token:
-            return context_token
-        
-        # Fall back to original implementation
+        """Enhanced get_current_access_token that checks HTTP context first."""
+
+        # 1. Direct Meta token (X-META-ACCESS-TOKEN header) -- highest priority
+        direct_token = FastMCPAuthIntegration.get_direct_meta_token()
+        if direct_token:
+            logger.debug("Using direct Meta token from X-META-ACCESS-TOKEN header")
+            return direct_token
+
+        # 2. Rule1 Bearer token -> fetch Meta token for the current account
+        bearer = FastMCPAuthIntegration.get_auth_token()
+        if bearer:
+            account_id = FastMCPAuthIntegration.get_current_account_id()
+            if account_id:
+                try:
+                    meta_token = await rule1_auth.get_meta_token(bearer, account_id)
+                    return meta_token
+                except Exception as exc:
+                    logger.error("Failed to get Meta token via Rule1: %s", exc)
+                    return None
+            else:
+                logger.warning(
+                    "Bearer token present but no account_id set -- "
+                    "cannot resolve Meta token"
+                )
+                return None
+
+        # 3. Fall back to original implementation (env var, etc.)
         return await original_get_current_access_token()
-    
+
     # Replace the function in all modules that imported it
     auth.get_current_access_token = get_current_access_token_with_http_support
     api.get_current_access_token = get_current_access_token_with_http_support
     authentication.get_current_access_token = get_current_access_token_with_http_support
-    
-    logger.info("Auth system patching complete - patched in auth, api, and authentication modules")
+
+    logger.info("Auth system patching complete - Rule1 integration active")
+
 
 # Global instance for easy access
 fastmcp_auth = FastMCPAuthIntegration()
 
-# Forward declaration of setup_starlette_middleware
-def setup_starlette_middleware(app):
-    pass
 
 def setup_fastmcp_http_auth(mcp_server):
-    """Setup HTTP authentication integration with FastMCP
-    
-    Args:
-        mcp_server: FastMCP server instance to configure
-    """
-    logger.info("Setting up FastMCP HTTP authentication integration")
-    
-    # 1. Patch FastMCP's run method to ensure our get_current_access_token patch is applied
-    # This remains crucial for the token to be picked up by tool calls.
-    patch_fastmcp_server(mcp_server) # This patches mcp_server.run
-    
-    # 2. Patch the methods that provide the Starlette app instance
-    # This ensures our middleware is added to the app Uvicorn will actually serve.
+    """Setup HTTP authentication integration with FastMCP."""
+    logger.info("Setting up FastMCP HTTP authentication integration (Rule1)")
 
+    # 1. Patch FastMCP's run method
+    patch_fastmcp_server(mcp_server)
+
+    # 2. Patch the methods that provide the Starlette app instance
     app_provider_methods = []
     if mcp_server.settings.json_response:
-        if hasattr(mcp_server, "streamable_http_app") and callable(mcp_server.streamable_http_app):
+        if hasattr(mcp_server, "streamable_http_app") and callable(
+            mcp_server.streamable_http_app
+        ):
             app_provider_methods.append("streamable_http_app")
         else:
-            logger.warning("mcp_server.streamable_http_app not found or not callable, cannot patch for JSON responses.")
-    else: # SSE
+            logger.warning(
+                "mcp_server.streamable_http_app not found, cannot patch for JSON responses."
+            )
+    else:
         if hasattr(mcp_server, "sse_app") and callable(mcp_server.sse_app):
             app_provider_methods.append("sse_app")
         else:
-            logger.warning("mcp_server.sse_app not found or not callable, cannot patch for SSE responses.")
+            logger.warning(
+                "mcp_server.sse_app not found, cannot patch for SSE responses."
+            )
 
     if not app_provider_methods:
-        logger.error("No suitable app provider method (streamable_http_app or sse_app) found on mcp_server. Cannot add HTTP Auth middleware.")
-        # Fallback or error handling might be needed here if this is critical
-    
+        logger.error(
+            "No suitable app provider method found on mcp_server. "
+            "Cannot add HTTP Auth middleware."
+        )
+
     for method_name in app_provider_methods:
         original_app_provider_method = getattr(mcp_server, method_name)
-        
-        def new_patched_app_provider_method(*args, **kwargs):
-            # Call the original method to get/create the Starlette app
-            app = original_app_provider_method(*args, **kwargs)
+
+        def new_patched_app_provider_method(*args, _orig=original_app_provider_method, _name=method_name, **kwargs):
+            app = _orig(*args, **kwargs)
             if app:
-                logger.debug(f"Original {method_name} returned app: {type(app)}. Adding AuthInjectionMiddleware.")
-                # Now, add our middleware to this specific app instance
-                setup_starlette_middleware(app) 
+                logger.debug(
+                    "Original %s returned app: %s. Adding AuthInjectionMiddleware.",
+                    _name,
+                    type(app),
+                )
+                setup_starlette_middleware(app)
             else:
-                logger.error(f"Original {method_name} returned None or a non-app object.")
+                logger.error("Original %s returned None.", _name)
             return app
-            
+
         setattr(mcp_server, method_name, new_patched_app_provider_method)
-        logger.debug(f"Patched mcp_server.{method_name} to inject AuthInjectionMiddleware.")
+        logger.debug("Patched mcp_server.%s to inject AuthInjectionMiddleware.", method_name)
 
-    # The old setup_request_middleware call is no longer needed here,
-    # as middleware addition is now handled by patching the app provider methods.
-    # try:
-    #     setup_request_middleware(mcp_server) 
-    # except Exception as e:
-    #     logger.warning(f"Could not setup request middleware: {e}")
+    logger.info("FastMCP HTTP authentication integration setup complete.")
 
-    logger.info("FastMCP HTTP authentication integration setup attempt complete.")
 
-# Remove the old setup_request_middleware function as its logic is integrated above
-# def setup_request_middleware(mcp_server): ... (delete this function)
+# ---------------------------------------------------------------------------
+# Starlette middleware
+# ---------------------------------------------------------------------------
 
-# --- AuthInjectionMiddleware definition ---
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-import json # Ensure json is imported if not already at the top
+
 
 class AuthInjectionMiddleware(BaseHTTPMiddleware):
+    """Extract auth tokens from HTTP headers and store in ContextVars.
+
+    Also validates the Bearer token against the Rule1 API and stores
+    the org context for downstream use.
+    """
+
     async def dispatch(self, request: Request, call_next):
-        logger.debug(f"HTTP Auth Middleware: Processing request to {request.url.path}")
-        logger.debug(f"HTTP Auth Middleware: Request headers: {list(request.headers.keys())}")
-        
-        # Extract both types of tokens for dual-header authentication
-        auth_token = FastMCPAuthIntegration.extract_token_from_headers(dict(request.headers))
-        pipeboard_token = FastMCPAuthIntegration.extract_pipeboard_token_from_headers(dict(request.headers))
-        
-        if auth_token:
-            logger.debug(f"HTTP Auth Middleware: Extracted auth token: {auth_token[:10]}...")
-            logger.debug("Injecting auth token into request context")
-            FastMCPAuthIntegration.set_auth_token(auth_token)
-        
-        if pipeboard_token:
-            logger.debug(f"HTTP Auth Middleware: Extracted Pipeboard token: {pipeboard_token[:10]}...")
-            logger.debug("Injecting Pipeboard token into request context")
-            FastMCPAuthIntegration.set_pipeboard_token(pipeboard_token)
-        
-        if not auth_token and not pipeboard_token:
+        logger.debug("HTTP Auth Middleware: Processing request to %s", request.url.path)
+
+        headers = dict(request.headers)
+
+        # Extract Bearer token (Rule1 / Clerk JWT / pgs_xxx)
+        bearer_token = FastMCPAuthIntegration.extract_token_from_headers(headers)
+
+        # Extract direct Meta token (escape hatch)
+        direct_meta = FastMCPAuthIntegration.extract_direct_meta_token_from_headers(headers)
+
+        if bearer_token:
+            logger.debug("HTTP Auth Middleware: Extracted Bearer token: %s...", bearer_token[:10])
+            FastMCPAuthIntegration.set_auth_token(bearer_token)
+
+            # Validate the Bearer token against Rule1 API
+            try:
+                org_ctx = await rule1_auth.validate_token(bearer_token)
+                FastMCPAuthIntegration.set_org_context(org_ctx)
+                logger.debug("HTTP Auth Middleware: Org context validated")
+            except Exception as exc:
+                logger.warning("HTTP Auth Middleware: Token validation failed: %s", exc)
+                # We still allow the request through -- individual tools will
+                # fail with a clear error if they need a valid token.
+
+        if direct_meta:
+            logger.debug("HTTP Auth Middleware: Extracted direct Meta token: %s...", direct_meta[:10])
+            FastMCPAuthIntegration.set_direct_meta_token(direct_meta)
+
+        if not bearer_token and not direct_meta:
             logger.warning("HTTP Auth Middleware: No authentication tokens found in headers")
-        
+
         try:
             response = await call_next(request)
             return response
         finally:
-            # Clear tokens that were set for this request
-            if auth_token:
+            # Clear all context-scoped state
+            if bearer_token:
                 FastMCPAuthIntegration.clear_auth_token()
-            if pipeboard_token:
-                FastMCPAuthIntegration.clear_pipeboard_token()
+                FastMCPAuthIntegration.clear_org_context()
+            if direct_meta:
+                FastMCPAuthIntegration.clear_direct_meta_token()
+            FastMCPAuthIntegration.clear_current_account_id()
+
 
 def setup_starlette_middleware(app):
-    """Add AuthInjectionMiddleware to the Starlette app if not already present.
-    
-    Args:
-        app: Starlette app instance
-    """
+    """Add AuthInjectionMiddleware to the Starlette app if not already present."""
     if not app:
         logger.error("Cannot setup Starlette middleware, app is None.")
         return
 
-    # Check if our specific middleware class is already in the stack
-    already_added = False
-    # Starlette's app.middleware is a list of Middleware objects.
-    # app.user_middleware contains middleware added by app.add_middleware()
-    for middleware_item in app.user_middleware:
-        if middleware_item.cls == AuthInjectionMiddleware:
-            already_added = True
-            break
-            
+    already_added = any(
+        mw.cls == AuthInjectionMiddleware for mw in app.user_middleware
+    )
+
     if not already_added:
         try:
             app.add_middleware(AuthInjectionMiddleware)
             logger.info("AuthInjectionMiddleware added to Starlette app successfully.")
         except Exception as e:
-            logger.error(f"Failed to add AuthInjectionMiddleware to Starlette app: {e}", exc_info=True)
+            logger.error(
+                "Failed to add AuthInjectionMiddleware to Starlette app: %s", e, exc_info=True
+            )
     else:
-        logger.debug("AuthInjectionMiddleware already present in Starlette app's middleware stack.") 
+        logger.debug("AuthInjectionMiddleware already present in Starlette app.")

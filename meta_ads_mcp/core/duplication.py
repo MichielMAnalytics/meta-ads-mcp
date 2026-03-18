@@ -219,12 +219,11 @@ if ENABLE_DUPLICATION:
 
 async def _forward_duplication_request(resource_type: str, resource_id: str, access_token: str, options: Dict[str, Any]) -> str:
     """
-    Forward duplication request to the cloud-hosted MCP API using dual-header authentication.
-    
-    This implements the dual-header authentication pattern for MCP server callbacks:
-    - Authorization: Bearer <facebook_token> - Facebook access token for Meta API calls
-    - X-Pipeboard-Token: <pipeboard_token> - Pipeboard API token for authentication
-    
+    Forward duplication request to the cloud-hosted duplication API.
+
+    Uses the Rule1 Bearer token (from Authorization header) for authentication
+    and fetches the Meta access token from the request context.
+
     Args:
         resource_type: Type of resource to duplicate (campaign, adset, ad, creative)
         resource_id: ID of the resource to duplicate
@@ -232,46 +231,36 @@ async def _forward_duplication_request(resource_type: str, resource_id: str, acc
         options: Duplication options
     """
     try:
-        # Get tokens from the request context that were set by the HTTP auth middleware
-        # In the dual-header authentication pattern:
-        # - Pipeboard token comes from X-Pipeboard-Token header (for authentication)
-        # - Facebook token comes from Authorization header (for Meta API calls)
+        # Get tokens from the request context set by AuthInjectionMiddleware
+        bearer_token = FastMCPAuthIntegration.get_auth_token()
+        facebook_token = access_token if access_token else None
 
-        # Get tokens from context set by AuthInjectionMiddleware
-        pipeboard_token = FastMCPAuthIntegration.get_pipeboard_token()
-        token_source = "contextvar" if pipeboard_token else None
-        facebook_token = FastMCPAuthIntegration.get_auth_token()
+        # Remove legacy pb_token from options if present
+        options.pop('pb_token', None)
 
-        # Fallback: proxy injects pb_token into arguments when ContextVar
-        # is unreachable (Starlette BaseHTTPMiddleware -> FastMCP dispatch breaks it)
-        if not pipeboard_token:
-            pipeboard_token = options.pop('pb_token', None)
-            if pipeboard_token:
-                token_source = "injected_argument"
-                logger.info("Using pipeboard_token from injected argument (ContextVar fallback)")
-        else:
-            # Remove pb_token from options so it is not sent to the API
-            options.pop('pb_token', None)
-
-        # Use provided access_token parameter if no Facebook token found in context
+        # If no Facebook token provided, try to resolve it
         if not facebook_token:
-            facebook_token = access_token if access_token else await auth.get_current_access_token()
+            # Try direct Meta token from header
+            direct_meta = FastMCPAuthIntegration.get_direct_meta_token()
+            if direct_meta:
+                facebook_token = direct_meta
+            else:
+                facebook_token = await auth.get_current_access_token()
 
         logger.info(
-            "Duplication auth: pipeboard=%s, facebook=%s, source=%s",
-            "set" if pipeboard_token else "MISSING",
+            "Duplication auth: bearer=%s, facebook=%s",
+            "set" if bearer_token else "MISSING",
             "set" if facebook_token else "MISSING",
-            token_source or "none"
         )
 
-        # Validate we have both required tokens
-        if not pipeboard_token:
+        # Validate we have the required tokens
+        if not bearer_token:
             raise DuplicationError(json.dumps({
                 "error": "authentication_required",
-                "message": "Pipeboard API token not found",
+                "message": "Bearer token not found",
                 "details": {
-                    "required": "Valid Pipeboard token via X-Pipeboard-Token header",
-                    "received_headers": "Check that the MCP server is forwarding the X-Pipeboard-Token header"
+                    "required": "Valid Bearer token (Clerk JWT or pgs_xxx) via Authorization header",
+                    "check": "Ensure the Authorization: Bearer <token> header is set"
                 }
             }, indent=2))
 
@@ -285,15 +274,15 @@ async def _forward_duplication_request(resource_type: str, resource_id: str, acc
                 }
             }, indent=2))
 
-        # Construct the API endpoint.
-        # PIPEBOARD_API_BASE_URL allows overriding for local e2e testing.
-        base_url = os.environ.get("PIPEBOARD_API_BASE_URL", "https://mcp.pipeboard.co")
+        # Construct the API endpoint
+        base_url = os.environ.get("RULE1_DUPLICATION_API_URL", "https://app.rule1.ai")
         endpoint = f"{base_url}/api/meta/duplicate/{resource_type}/{resource_id}"
-        
-        # Prepare the dual-header authentication as per API documentation
+
+        # Prepare headers -- send the Bearer token for authentication
+        # and the Facebook token for Meta API calls
         headers = {
-            "Authorization": f"Bearer {facebook_token}",  # Facebook token for Meta API
-            "X-Pipeboard-Token": pipeboard_token,         # Pipeboard token for auth
+            "Authorization": f"Bearer {bearer_token}",
+            "X-Meta-Access-Token": facebook_token,
             "Content-Type": "application/json",
             "User-Agent": "meta-ads-mcp/1.0"
         }
@@ -344,7 +333,7 @@ async def _forward_duplication_request(resource_type: str, resource_id: str, acc
                         "success": False,
                         "error": "subscription_required",
                         "message": error_data.get("message", "This feature is not available in your current plan"),
-                        "upgrade_url": error_data.get("upgrade_url", "https://pipeboard.co/upgrade"),
+                        "upgrade_url": error_data.get("upgrade_url", "https://app.rule1.ai/upgrade"),
                         "suggestion": error_data.get("suggestion", "Please upgrade your account to access this feature")
                     }, indent=2))
                 except DuplicationError:
@@ -354,7 +343,7 @@ async def _forward_duplication_request(resource_type: str, resource_id: str, acc
                         "success": False,
                         "error": "subscription_required",
                         "message": "This feature is not available in your current plan",
-                        "upgrade_url": "https://pipeboard.co/upgrade",
+                        "upgrade_url": "https://app.rule1.ai/upgrade",
                         "suggestion": "Please upgrade your account to access this feature"
                     }, indent=2))
             elif response.status_code == 403:
@@ -367,7 +356,7 @@ async def _forward_duplication_request(resource_type: str, resource_id: str, acc
                             "error": "premium_feature_required",
                             "message": error_data.get("message", "This is a premium feature that requires subscription"),
                             "details": error_data.get("details", {
-                                "upgrade_url": "https://pipeboard.co/upgrade",
+                                "upgrade_url": "https://app.rule1.ai/upgrade",
                                 "suggestion": "Please upgrade your account to access this feature"
                             })
                         }, indent=2))

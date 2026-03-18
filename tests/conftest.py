@@ -48,15 +48,23 @@ def test_headers():
 
 @pytest.fixture
 def pipeboard_auth_headers(test_headers):
-    """Headers with Pipeboard authentication token"""
+    """Headers with Bearer authentication token (legacy fixture name)"""
     headers = test_headers.copy()
-    headers["Authorization"] = "Bearer test_pipeboard_token_12345"
+    headers["Authorization"] = "Bearer test_bearer_token_12345"
     return headers
 
 
 @pytest.fixture
-def meta_app_auth_headers(test_headers):
-    """Headers with Meta app ID authentication"""
+def bearer_auth_headers(test_headers):
+    """Headers with Rule1 Bearer authentication token"""
     headers = test_headers.copy()
-    headers["X-META-APP-ID"] = "123456789012345"
+    headers["Authorization"] = "Bearer test_bearer_token_12345"
+    return headers
+
+
+@pytest.fixture
+def meta_token_headers(test_headers):
+    """Headers with direct Meta access token (escape hatch)"""
+    headers = test_headers.copy()
+    headers["X-META-ACCESS-TOKEN"] = "test_meta_token_12345"
     return headers 
