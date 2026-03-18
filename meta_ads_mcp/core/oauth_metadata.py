@@ -65,7 +65,7 @@ async def protected_resource_metadata(request: Request) -> JSONResponse:
     # Behind a load balancer / reverse proxy, X-Forwarded-Proto is the real scheme.
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.hostname
-    resource_url = f"{proto}://{host}/mcp/"
+    resource_url = f"{proto}://{host}/mcp"
 
     metadata = {
         "resource": resource_url,
