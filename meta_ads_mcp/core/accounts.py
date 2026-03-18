@@ -64,20 +64,16 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
             import asyncio
             from .http_auth_integration import FastMCPAuthIntegration, _auth_token, _direct_meta_token
 
-            # --- DIAGNOSTIC LOGGING ---
+            # --- DIAGNOSTIC ---
+            import sys
             task = asyncio.current_task()
             task_name = task.get_name() if task else "NO_TASK"
             cv_bearer = _auth_token.get(None)
             cv_direct = _direct_meta_token.get(None)
-            logger.warning(
-                "get_ad_accounts DIAG: task=%s, cv_bearer=%s, cv_direct=%s, "
-                "get_auth_token()=%s, get_direct_meta_token()=%s",
-                task_name,
-                cv_bearer[:15] + "..." if cv_bearer else None,
-                cv_direct[:15] + "..." if cv_direct else None,
-                (FastMCPAuthIntegration.get_auth_token() or "")[:15] or None,
-                (FastMCPAuthIntegration.get_direct_meta_token() or "")[:15] or None,
-            )
+            print(f"[DIAG] TOOL get_ad_accounts: task={task_name}", file=sys.stderr, flush=True)
+            print(f"[DIAG] TOOL cv_bearer={cv_bearer[:15] + '...' if cv_bearer else None}", file=sys.stderr, flush=True)
+            print(f"[DIAG] TOOL cv_direct={cv_direct[:15] + '...' if cv_direct else None}", file=sys.stderr, flush=True)
+            print(f"[DIAG] TOOL get_auth_token()={(FastMCPAuthIntegration.get_auth_token() or '')[:15] or None}", file=sys.stderr, flush=True)
             # --- END DIAGNOSTIC ---
 
             from . import rule1_auth

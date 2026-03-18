@@ -355,22 +355,16 @@ class AuthInjectionMiddleware:
             import asyncio
             task = asyncio.current_task()
             task_name = task.get_name() if task else "NO_TASK"
-            logger.warning(
-                "ASGI Auth DIAG: setting bearer=%s... task=%s cv_before=%s",
-                bearer_token[:15],
-                task_name,
-                _auth_token.get(None) is not None,
-            )
+            print(f"[DIAG] BEARER FOUND: {bearer_token[:15]}... task={task_name}", file=sys.stderr, flush=True)
             FastMCPAuthIntegration.set_auth_token(bearer_token)
-            logger.warning(
-                "ASGI Auth DIAG: cv_after_set=%s",
-                _auth_token.get(None) is not None,
-            )
+            cv_check = _auth_token.get(None)
+            print(f"[DIAG] ContextVar set: {cv_check is not None}, value={cv_check[:15] if cv_check else None}...", file=sys.stderr, flush=True)
             try:
                 org_ctx = await rule1_auth.validate_token(bearer_token)
                 FastMCPAuthIntegration.set_org_context(org_ctx)
+                print(f"[DIAG] Token validated, org context set", file=sys.stderr, flush=True)
             except Exception as exc:
-                logger.warning("ASGI Auth: Token validation failed: %s", exc)
+                print(f"[DIAG] Token validation failed: {exc}", file=sys.stderr, flush=True)
 
         if direct_meta:
             logger.debug("ASGI Auth: Direct Meta token: %s...", direct_meta[:10])
