@@ -397,7 +397,11 @@ def setup_starlette_middleware(app):
         logger.error("Cannot setup middleware, app is None.")
         return
 
-    # Wrap the ASGI app directly (no add_middleware — that requires
-    # BaseHTTPMiddleware subclasses).
-    app.middleware_stack = AuthInjectionMiddleware(app.middleware_stack)
-    logger.info("AuthInjectionMiddleware (raw ASGI) installed successfully.")
+    # Use add_middleware with the raw ASGI class. Starlette accepts any
+    # callable(app) -> ASGI-app via add_middleware, not just
+    # BaseHTTPMiddleware subclasses.
+    try:
+        app.add_middleware(AuthInjectionMiddleware)
+        logger.info("AuthInjectionMiddleware (raw ASGI) installed successfully.")
+    except Exception as e:
+        logger.error("Failed to add AuthInjectionMiddleware: %s", e, exc_info=True)
