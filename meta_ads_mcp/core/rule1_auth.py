@@ -120,7 +120,7 @@ async def validate_token(bearer_token: str) -> Dict[str, Any]:
         raise ValueError(f"Could not reach Rule1 API: {exc}") from exc
 
 
-async def get_meta_token(bearer_token: str, account_id: str) -> str:
+async def get_meta_token(bearer_token: str, account_id: str, organization_id: Optional[str] = None) -> str:
     """Fetch the decrypted Meta access token for a given ad account.
 
     Calls ``GET {RULE1_API_URL}/api/mcp/accounts/{account_id}/meta-token``
@@ -145,6 +145,8 @@ async def get_meta_token(bearer_token: str, account_id: str) -> str:
 
     # The Rule1 API accepts both UUID and platformAccountId (e.g., "act_123")
     url = f"{RULE1_API_URL}/api/mcp/accounts/{account_id}/meta-token"
+    if organization_id:
+        url += f"?organizationId={organization_id}"
     headers = {"Authorization": f"Bearer {bearer_token}"}
 
     logger.debug("get_meta_token: calling %s", url)
@@ -184,7 +186,7 @@ async def get_meta_token(bearer_token: str, account_id: str) -> str:
         raise ValueError(f"Could not reach Rule1 API: {exc}") from exc
 
 
-async def list_ad_accounts(bearer_token: str) -> List[Dict[str, Any]]:
+async def list_ad_accounts(bearer_token: str, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """List ad accounts accessible by the authenticated user.
 
     Calls ``GET {RULE1_API_URL}/api/mcp/accounts`` with the Bearer token.
@@ -204,6 +206,8 @@ async def list_ad_accounts(bearer_token: str) -> List[Dict[str, Any]]:
         return cached
 
     url = f"{RULE1_API_URL}/api/mcp/accounts"
+    if organization_id:
+        url += f"?organizationId={organization_id}"
     headers = {"Authorization": f"Bearer {bearer_token}"}
 
     logger.debug("list_ad_accounts: calling %s", url)

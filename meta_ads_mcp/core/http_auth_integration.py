@@ -40,6 +40,11 @@ _current_account_id: contextvars.ContextVar[Optional[str]] = contextvars.Context
     "current_account_id", default=None
 )
 
+# The organization_id for multi-org users
+_current_organization_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "current_organization_id", default=None
+)
+
 
 class FastMCPAuthIntegration:
     """Direct integration with FastMCP for HTTP authentication"""
@@ -105,6 +110,20 @@ class FastMCPAuthIntegration:
     @staticmethod
     def clear_current_account_id() -> None:
         _current_account_id.set(None)
+
+    # -- Organization id -----------------------------------------------------
+
+    @staticmethod
+    def set_current_organization_id(org_id: str) -> None:
+        _current_organization_id.set(org_id)
+
+    @staticmethod
+    def get_current_organization_id() -> Optional[str]:
+        return _current_organization_id.get(None)
+
+    @staticmethod
+    def clear_current_organization_id() -> None:
+        _current_organization_id.set(None)
 
     # -- Header extraction ---------------------------------------------------
 
@@ -404,6 +423,7 @@ class AuthInjectionMiddleware:
             if direct_meta:
                 FastMCPAuthIntegration.clear_direct_meta_token()
             FastMCPAuthIntegration.clear_current_account_id()
+            FastMCPAuthIntegration.clear_current_organization_id()
 
 
 def setup_starlette_middleware(app):

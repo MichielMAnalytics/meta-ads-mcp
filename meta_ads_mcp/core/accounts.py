@@ -40,7 +40,7 @@ def _normalize_account_monetary_fields(account: dict) -> dict:
 
 
 @mcp_server.tool()
-async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me", limit: int = 200) -> str:
+async def get_ad_accounts(access_token: Optional[str] = None, organization_id: Optional[str] = None, user_id: str = "me", limit: int = 200) -> str:
     """
     Get ad accounts accessible by a user.
 
@@ -53,6 +53,7 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
 
     Args:
         access_token: Meta API access token (optional - will use cached token if not provided)
+        organization_id: Rule1 organization ID (required for multi-org users, use list_my_organizations to find yours)
         user_id: Meta user ID or "me" for the current user
         limit: Maximum number of accounts to return (default: 200)
     """
@@ -61,22 +62,12 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
     # If no explicit access_token, try to list accounts from Rule1 API
     if not access_token:
         try:
-            import asyncio
-            from .http_auth_integration import FastMCPAuthIntegration, _auth_token, _direct_meta_token
-
-            # --- DIAGNOSTIC ---
-            import sys
-            task = asyncio.current_task()
-            task_name = task.get_name() if task else "NO_TASK"
-            cv_bearer = _auth_token.get(None)
-            cv_direct = _direct_meta_token.get(None)
-            print(f"[DIAG] TOOL get_ad_accounts: task={task_name}", file=sys.stderr, flush=True)
-            print(f"[DIAG] TOOL cv_bearer={cv_bearer[:15] + '...' if cv_bearer else None}", file=sys.stderr, flush=True)
-            print(f"[DIAG] TOOL cv_direct={cv_direct[:15] + '...' if cv_direct else None}", file=sys.stderr, flush=True)
-            print(f"[DIAG] TOOL get_auth_token()={(FastMCPAuthIntegration.get_auth_token() or '')[:15] or None}", file=sys.stderr, flush=True)
-            # --- END DIAGNOSTIC ---
-
+            from .http_auth_integration import FastMCPAuthIntegration
             from . import rule1_auth
+
+            # Store organization_id in ContextVar for other tools to use
+            if organization_id:
+                FastMCPAuthIntegration.set_current_organization_id(organization_id)
 
             # Check for direct Meta token first
             direct_meta = FastMCPAuthIntegration.get_direct_meta_token()
@@ -86,8 +77,7 @@ async def get_ad_accounts(access_token: Optional[str] = None, user_id: str = "me
             else:
                 bearer = FastMCPAuthIntegration.get_auth_token()
                 if bearer:
-                    logger.debug("get_ad_accounts: fetching accounts from Rule1 API")
-                    accounts = await rule1_auth.list_ad_accounts(bearer)
+                    accounts = await rule1_auth.list_ad_accounts(bearer, organization_id)
                     return json.dumps({
                         "data": accounts,
                         "source": "rule1",
