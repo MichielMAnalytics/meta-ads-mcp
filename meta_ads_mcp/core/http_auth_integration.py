@@ -337,6 +337,17 @@ class AuthInjectionMiddleware:
             for k, v in scope.get("headers", [])
         }
 
+        # DIAG: log all headers for POST /mcp to see what Claude Code sends
+        import sys
+        if method == "POST" and "/mcp" in path:
+            header_keys = list(headers.keys())
+            has_auth = "authorization" in headers
+            print(f"[DIAG] POST /mcp headers: {header_keys}", file=sys.stderr, flush=True)
+            print(f"[DIAG] has 'authorization': {has_auth}", file=sys.stderr, flush=True)
+            if has_auth:
+                auth_val = headers["authorization"]
+                print(f"[DIAG] authorization value: {auth_val[:30]}...", file=sys.stderr, flush=True)
+
         bearer_token = FastMCPAuthIntegration.extract_token_from_headers(headers)
         direct_meta = FastMCPAuthIntegration.extract_direct_meta_token_from_headers(headers)
 
