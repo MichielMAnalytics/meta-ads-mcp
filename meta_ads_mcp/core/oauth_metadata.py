@@ -61,11 +61,11 @@ async def protected_resource_metadata(request: Request) -> JSONResponse:
 
     fapi_url = _derive_clerk_fapi_url(pk)
 
-    # Build the resource URL from the incoming request
-    resource_url = str(request.url).split("/.well-known")[0]
-    # Ensure it ends with /mcp/ (the MCP endpoint)
-    if not resource_url.endswith("/mcp"):
-        resource_url = resource_url.rstrip("/") + "/mcp/"
+    # Build the resource URL from the incoming request.
+    # Behind a load balancer / reverse proxy, X-Forwarded-Proto is the real scheme.
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.hostname
+    resource_url = f"{proto}://{host}/mcp/"
 
     metadata = {
         "resource": resource_url,
