@@ -151,14 +151,15 @@ async def get_meta_token(bearer_token: str, account_id: str, organization_id: Op
     if not account_id:
         raise ValueError("account_id is required to fetch a Meta token")
 
-    cache_key = f"{bearer_token}:{account_id}"
+    # Strip act_ prefix — Rule1 DB stores numeric IDs without prefix
+    clean_id = account_id.removeprefix("act_")
+    cache_key = f"{bearer_token}:{clean_id}"
     cached = _meta_token_cache.get(cache_key)
     if cached is not None:
         logger.debug("get_meta_token: returning cached Meta token for account %s", account_id)
         return cached
 
-    # The Rule1 API accepts both UUID and platformAccountId (e.g., "act_123")
-    url = f"{RULE1_API_URL}/api/mcp/accounts/{account_id}/meta-token"
+    url = f"{RULE1_API_URL}/api/mcp/accounts/{clean_id}/meta-token"
     if organization_id:
         url += f"?organizationId={organization_id}"
     headers = {"Authorization": f"Bearer {bearer_token}"}
