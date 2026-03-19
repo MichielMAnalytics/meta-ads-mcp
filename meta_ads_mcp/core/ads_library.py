@@ -11,7 +11,8 @@ from .server import mcp_server
 DISABLE_ADS_LIBRARY = bool(os.environ.get("META_ADS_DISABLE_ADS_LIBRARY", ""))
 
 if not DISABLE_ADS_LIBRARY:
-    @mcp_server.tool()
+    # TEMPORARILY DISABLED - not needed, requires special Meta app role
+    # @mcp_server.tool()
     @meta_api_tool
     async def search_ads_archive(
         search_terms: str,
