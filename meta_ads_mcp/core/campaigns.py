@@ -111,7 +111,8 @@ async def get_campaign_details(campaign_id: str, access_token: Optional[str] = N
     return json.dumps(data, indent=2)
 
 
-@mcp_server.tool()
+# TEMPORARILY DISABLED - write tool
+# @mcp_server.tool()
 @meta_api_tool
 async def create_campaign(
     account_id: str,
@@ -251,7 +252,8 @@ async def create_campaign(
         }, indent=2)
 
 
-@mcp_server.tool()
+# TEMPORARILY DISABLED - write tool
+# @mcp_server.tool()
 @meta_api_tool
 async def update_campaign(
     campaign_id: str,
