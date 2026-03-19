@@ -301,7 +301,11 @@ def meta_api_tool(func):
                     if bearer:
                         # Extract account_id and organization_id from tool kwargs
                         account_id = kwargs.get("account_id")
-                        org_id = kwargs.get("organization_id") or FastMCPAuthIntegration.get_current_organization_id()
+                        org_id = (
+                            kwargs.get("organization_id")
+                            or FastMCPAuthIntegration.get_current_organization_id()
+                            or _rule1_auth.get_organization_for_bearer(bearer)
+                        )
                         if account_id:
                             # Set ContextVar so get_current_access_token can also use it
                             FastMCPAuthIntegration.set_current_account_id(account_id)

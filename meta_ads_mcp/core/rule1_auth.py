@@ -56,12 +56,26 @@ class _TTLCache:
 # Shared caches
 _org_cache = _TTLCache()          # bearer_token -> org info   (long-lived, ~60 s)
 _meta_token_cache = _TTLCache()   # (bearer, account_id) -> meta token (5 min)
-_accounts_cache = _TTLCache()     # bearer_token -> account list (60 s)
+_accounts_cache = _TTLCache()     # bearer_token:org_id -> account list (60 s)
 
 # Cache TTLs in seconds
 _ORG_CACHE_TTL = 60
 _META_TOKEN_CACHE_TTL = 300  # 5 minutes
 _ACCOUNTS_CACHE_TTL = 60
+
+# Persistent org_id store: bearer_token -> organization_id
+# Set once by get_ad_accounts, reused by all other tools in the session.
+_bearer_org_map: Dict[str, str] = {}
+
+
+def set_organization_for_bearer(bearer_token: str, org_id: str) -> None:
+    """Remember which organization_id to use for this bearer token."""
+    _bearer_org_map[bearer_token] = org_id
+
+
+def get_organization_for_bearer(bearer_token: str) -> Optional[str]:
+    """Get the stored organization_id for this bearer token."""
+    return _bearer_org_map.get(bearer_token)
 
 # ---------------------------------------------------------------------------
 # Public API

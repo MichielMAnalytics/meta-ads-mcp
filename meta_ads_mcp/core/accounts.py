@@ -65,9 +65,12 @@ async def get_ad_accounts(access_token: Optional[str] = None, organization_id: O
             from .http_auth_integration import FastMCPAuthIntegration
             from . import rule1_auth
 
-            # Store organization_id in ContextVar for other tools to use
+            # Store organization_id persistently for other tools to use
             if organization_id:
                 FastMCPAuthIntegration.set_current_organization_id(organization_id)
+                bearer = FastMCPAuthIntegration.get_auth_token()
+                if bearer:
+                    rule1_auth.set_organization_for_bearer(bearer, organization_id)
 
             # Check for direct Meta token first
             direct_meta = FastMCPAuthIntegration.get_direct_meta_token()
