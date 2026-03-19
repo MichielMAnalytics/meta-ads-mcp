@@ -47,12 +47,13 @@ async def get_adsets(account_id: str, access_token: Optional[str] = None, limit:
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_adset_details(adset_id: str, access_token: Optional[str] = None) -> str:
+async def get_adset_details(adset_id: str, account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get detailed information about a specific ad set.
-    
+
     Args:
         adset_id: Meta Ads ad set ID
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
     
     Example:

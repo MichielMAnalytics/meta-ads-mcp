@@ -205,12 +205,13 @@ async def get_ads(account_id: str, access_token: Optional[str] = None, limit: in
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_ad_details(ad_id: str, access_token: Optional[str] = None) -> str:
+async def get_ad_details(ad_id: str, account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get detailed information about a specific ad.
-    
+
     Args:
         ad_id: Meta Ads ad ID
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
     """
     if not ad_id:
@@ -228,11 +229,12 @@ async def get_ad_details(ad_id: str, access_token: Optional[str] = None) -> str:
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_creative_details(creative_id: str, access_token: Optional[str] = None) -> str:
+async def get_creative_details(creative_id: str, account_id: str, access_token: Optional[str] = None) -> str:
     """Get detailed information about a specific ad creative by its ID.
 
     Args:
         creative_id: Meta Ads creative ID (required)
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional)
     """
     if not creative_id:
@@ -351,12 +353,13 @@ async def create_ad(
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_ad_creatives(ad_id: str, access_token: Optional[str] = None) -> str:
+async def get_ad_creatives(ad_id: str, account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get creative details for a specific ad. Requires an ad_id (not account_id). Use get_ads first to find ad IDs.
-    
+
     Args:
         ad_id: Meta Ads ad ID (required)
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
     """
     if not ad_id:
@@ -428,12 +431,13 @@ async def get_ad_creatives(ad_id: str, access_token: Optional[str] = None) -> st
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_ad_image(ad_id: str, access_token: Optional[str] = None) -> Image:
+async def get_ad_image(ad_id: str, account_id: str, access_token: Optional[str] = None) -> Image:
     """
     Get, download, and visualize a Meta ad image in one step. Useful to see the image in the LLM.
-    
+
     Args:
         ad_id: Meta Ads ad ID
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
     
     Returns:
@@ -630,7 +634,7 @@ async def get_ad_image(ad_id: str, access_token: Optional[str] = None) -> Image:
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_ad_video(ad_id: str = "", video_id: str = "", access_token: Optional[str] = None) -> str:
+async def get_ad_video(account_id: str, ad_id: str = "", video_id: str = "", access_token: Optional[str] = None) -> str:
     """
     Get video details and source URL for a Meta ad video creative. Returns the video source URL
     (direct download link), thumbnail URL, and metadata (title, description, duration).
@@ -638,6 +642,7 @@ async def get_ad_video(ad_id: str = "", video_id: str = "", access_token: Option
     Provide either ad_id (to auto-extract the video from the ad creative) or video_id directly.
 
     Args:
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         ad_id: Meta Ads ad ID (will extract video_id from the ad creative)
         video_id: Meta video ID (use this if you already have it from get_ad_creatives)
         access_token: Meta API access token (optional - will use cached token if not provided)

@@ -9,12 +9,13 @@ from .server import mcp_server
 
 @mcp_server.tool()
 @meta_api_tool
-async def search_interests(query: str, access_token: Optional[str] = None, limit: int = 25) -> str:
+async def search_interests(query: str, account_id: str, access_token: Optional[str] = None, limit: int = 25) -> str:
     """
     Search for interest targeting options by keyword.
-    
+
     Args:
         query: Search term for interests (e.g., "baseball", "cooking", "travel")
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
         limit: Maximum number of results to return (default: 25)
     
@@ -38,13 +39,14 @@ async def search_interests(query: str, access_token: Optional[str] = None, limit
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_interest_suggestions(interest_list: List[str], access_token: Optional[str] = None, limit: int = 25) -> str:
+async def get_interest_suggestions(interest_list: List[str], account_id: str, access_token: Optional[str] = None, limit: int = 25) -> str:
     """
     Get interest suggestions based on existing interests.
-    
+
     Args:
         interest_list: List of interest names to get suggestions for (e.g., ["Basketball", "Soccer"])
-        access_token: Meta API access token (optional - will use cached token if not provided)  
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
+        access_token: Meta API access token (optional - will use cached token if not provided)
         limit: Maximum number of suggestions to return (default: 25)
     
     Returns:
@@ -68,8 +70,8 @@ async def get_interest_suggestions(interest_list: List[str], access_token: Optio
 @mcp_server.tool()
 @meta_api_tool
 async def estimate_audience_size(
+    account_id: Union[str, int],
     access_token: Optional[str] = None,
-    account_id: Optional[Union[str, int]] = None,
     targeting: Optional[Dict[str, Any]] = None,
     optimization_goal: str = "REACH",
     # Backwards compatibility for simple interest validation
@@ -84,8 +86,8 @@ async def estimate_audience_size(
     compatibility for simple interest validation.
     
     Args:
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
-        account_id: Meta Ads account ID (format: act_XXXXXXXXX) - required for comprehensive estimation
         targeting: Complete targeting specification including demographics, geography, interests, etc.
                   Example: {
                       "age_min": 25,
@@ -106,8 +108,7 @@ async def estimate_audience_size(
         reach_estimate, and targeting validation
     """
     # Coerce numeric IDs to strings
-    if account_id is not None:
-        account_id = str(account_id)
+    account_id = str(account_id)
 
     # Handle backwards compatibility - simple interest validation
     # Check if we're in backwards compatibility mode (interest params provided OR no comprehensive params)

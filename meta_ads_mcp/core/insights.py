@@ -46,19 +46,19 @@ def _strip_redundant_actions(row: dict) -> dict:
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_insights(object_id: str = "", access_token: Optional[str] = None,
+async def get_insights(account_id: str, object_id: str = "", access_token: Optional[str] = None,
                       time_range: Union[str, Dict[str, str]] = "maximum", breakdown: str = "",
                       level: str = "ad", limit: int = 25, after: str = "",
                       action_attribution_windows: Optional[List[str]] = None,
                       compact: bool = False,
-                      account_id: str = "", campaign_id: str = "",
+                      campaign_id: str = "",
                       adset_id: str = "", ad_id: str = "") -> str:
     """
     Get performance insights for a campaign, ad set, ad or account.
 
     Args:
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX). Also used as alias for object_id when querying account-level insights.
         object_id: ID of the campaign, ad set, ad or account. You can also use the alias parameters below.
-        account_id: Alias for object_id when querying account-level insights
         campaign_id: Alias for object_id when querying campaign-level insights
         adset_id: Alias for object_id when querying ad-set-level insights
         ad_id: Alias for object_id when querying ad-level insights

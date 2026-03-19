@@ -86,16 +86,17 @@ async def get_campaigns(
 
 @mcp_server.tool()
 @meta_api_tool
-async def get_campaign_details(campaign_id: str, access_token: Optional[str] = None) -> str:
+async def get_campaign_details(campaign_id: str, account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get detailed information about a specific campaign.
 
-    Note: This function requests a specific set of fields ('id,name,objective,status,...'). 
-    The Meta API offers many other fields for campaigns (e.g., 'effective_status', 'source_campaign_id', etc.) 
+    Note: This function requests a specific set of fields ('id,name,objective,status,...').
+    The Meta API offers many other fields for campaigns (e.g., 'effective_status', 'source_campaign_id', etc.)
     that could be added to the 'fields' parameter in the code if needed.
-    
+
     Args:
         campaign_id: Meta Ads campaign ID
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
     """
     if not campaign_id:

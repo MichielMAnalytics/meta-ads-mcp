@@ -24,7 +24,7 @@ from .utils import logger
 ENABLE_LOGIN_LINK = not bool(os.environ.get("META_ADS_DISABLE_LOGIN_LINK", ""))
 
 
-async def get_login_link(access_token: Optional[str] = None) -> str:
+async def get_login_link(account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get authentication status and instructions for Meta Ads authentication.
 
@@ -33,6 +33,7 @@ async def get_login_link(access_token: Optional[str] = None) -> str:
     Authorization header.
 
     Args:
+        account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional)
 
     Returns:

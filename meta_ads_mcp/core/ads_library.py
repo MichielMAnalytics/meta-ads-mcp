@@ -16,6 +16,7 @@ if not DISABLE_ADS_LIBRARY:
     async def search_ads_archive(
         search_terms: str,
         ad_reached_countries: List[str],
+        account_id: str,
         access_token: Optional[str] = None,
         ad_type: str = "ALL",
         limit: int = 25,  # Default limit, adjust as needed
@@ -27,6 +28,7 @@ if not DISABLE_ADS_LIBRARY:
         Args:
             search_terms: The search query for ads.
             ad_reached_countries: List of country codes (e.g., ["US", "GB"]).
+            account_id: Meta Ads account ID (format: act_XXXXXXXXX).
             access_token: Meta API access token (optional - will use cached token if not provided).
             ad_type: Type of ads to search for (e.g., POLITICAL_AND_ISSUE_ADS, HOUSING_ADS, ALL).
             limit: Maximum number of ads to return.
