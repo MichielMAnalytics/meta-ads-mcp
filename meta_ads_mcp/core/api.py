@@ -297,7 +297,9 @@ def meta_api_tool(func):
                     logger.debug("Using direct Meta token from X-META-ACCESS-TOKEN header")
                 else:
                     # Try Rule1 Bearer token path
+                    import sys
                     bearer = FastMCPAuthIntegration.get_auth_token()
+                    print(f"[DIAG] meta_api_tool: bearer={bearer[:15] + '...' if bearer else None}", file=sys.stderr, flush=True)
                     if bearer:
                         # Extract account_id and organization_id from tool kwargs
                         account_id = kwargs.get("account_id")
@@ -306,6 +308,7 @@ def meta_api_tool(func):
                             or FastMCPAuthIntegration.get_current_organization_id()
                             or _rule1_auth.get_organization_for_bearer(bearer)
                         )
+                        print(f"[DIAG] meta_api_tool: account_id={account_id}, org_id={org_id}", file=sys.stderr, flush=True)
                         if account_id:
                             # Set ContextVar so get_current_access_token can also use it
                             FastMCPAuthIntegration.set_current_account_id(account_id)
@@ -316,19 +319,12 @@ def meta_api_tool(func):
                                     bearer, account_id, org_id
                                 )
                                 kwargs["access_token"] = meta_token
-                                logger.debug(
-                                    "Using Meta token from Rule1 for account %s",
-                                    account_id,
-                                )
+                                print(f"[DIAG] meta_api_tool: got Meta token for {account_id}", file=sys.stderr, flush=True)
                             except Exception as exc:
-                                logger.error(
-                                    "Failed to get Meta token via Rule1: %s", exc
-                                )
+                                print(f"[DIAG] meta_api_tool EXCEPTION: {exc}", file=sys.stderr, flush=True)
                                 # Fall through to get_current_access_token
                         else:
-                            logger.debug(
-                                "Bearer token present but no account_id in kwargs"
-                            )
+                            print(f"[DIAG] meta_api_tool: no account_id in kwargs: {list(kwargs.keys())}", file=sys.stderr, flush=True)
 
                     # If still no token, try the patched get_current_access_token
                     if "access_token" not in kwargs or not kwargs.get("access_token"):
