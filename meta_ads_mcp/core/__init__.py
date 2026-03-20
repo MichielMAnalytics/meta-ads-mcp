@@ -1,6 +1,7 @@
 """Core functionality for Meta Ads API MCP package."""
 
 from .server import mcp_server
+from .organizations import list_my_organizations
 from .accounts import get_ad_accounts, get_account_info
 from .campaigns import get_campaigns, get_campaign_details, create_campaign
 from .adsets import get_adsets, get_adset_details, update_adset
@@ -17,6 +18,7 @@ from .openai_deep_research import search, fetch  # OpenAI MCP Deep Research tool
 
 __all__ = [
     'mcp_server',
+    'list_my_organizations',
     'get_ad_accounts',
     'get_account_info',
     'get_campaigns',

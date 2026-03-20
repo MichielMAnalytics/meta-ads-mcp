@@ -56,6 +56,9 @@ async def get_insights(account_id: str, object_id: str = "", access_token: Optio
     """
     Get performance insights for a campaign, ad set, ad or account.
 
+    Requires a valid account_id. Call list_my_organizations first to get your
+    organization_id, then get_ad_accounts to find account IDs.
+
     Args:
         account_id: Meta Ads account ID (format: act_XXXXXXXXX). Also used as alias for object_id when querying account-level insights.
         object_id: ID of the campaign, ad set, ad or account. You can also use the alias parameters below.

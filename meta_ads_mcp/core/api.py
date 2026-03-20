@@ -340,15 +340,14 @@ def meta_api_tool(func):
 
             # Final validation
             if "access_token" not in kwargs or not kwargs["access_token"]:
-                logger.warning("No access token available, authentication needed")
+                logger.warning("No access token available — likely missing organization_id")
                 return json.dumps(
                     {
                         "error": {
-                            "message": "Authentication Required",
+                            "message": "Organization ID required",
                             "details": {
-                                "description": "A valid access token is required",
-                                "action_required": "Provide a Bearer token (Clerk JWT or pgs_xxx) in the Authorization header",
-                                "alternative": "Or provide a direct Meta token via X-META-ACCESS-TOKEN header",
+                                "description": "Could not resolve an access token. This usually means organization_id was not provided.",
+                                "action_required": "Call list_my_organizations first, then pass the organization_id to get_ad_accounts before using this tool.",
                             },
                         }
                     },

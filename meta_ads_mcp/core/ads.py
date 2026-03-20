@@ -164,7 +164,10 @@ async def get_ads(account_id: str, access_token: Optional[str] = None, limit: in
                  campaign_id: str = "", adset_id: str = "") -> str:
     """
     Get ads for a Meta Ads account with optional filtering.
-    
+
+    Requires a valid account_id. Call list_my_organizations first to get your
+    organization_id, then get_ad_accounts to find account IDs.
+
     Args:
         account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)

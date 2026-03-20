@@ -19,13 +19,10 @@ async def get_campaigns(
 ) -> str:
     """
     Get campaigns for a Meta Ads account with optional filtering.
-    
-    Note: By default, the Meta API returns a subset of available fields. 
-    Other fields like 'effective_status', 'spend_cap', 'budget_remaining',
-    'promoted_object', 'source_campaign_id', etc., might be available but
-    require specifying them in the API call (currently not exposed by this
-    tool's parameters).
-    
+
+    Requires a valid account_id. Call list_my_organizations first to get your
+    organization_id, then get_ad_accounts to find account IDs.
+
     Args:
         account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)

@@ -9,7 +9,12 @@ from .resources import list_resources, get_resource
 from .utils import logger
 
 # Initialize FastMCP server
-mcp_server = FastMCP("meta-ads")
+mcp_server = FastMCP(
+    "meta-ads",
+    instructions="Start by calling list_my_organizations to get your organization ID. "
+    "Then call get_ad_accounts with that organization_id to discover ad account IDs. "
+    "Most tools require a valid account_id obtained this way.",
+)
 
 # Register resource URIs
 mcp_server.resource(uri="meta-ads://resources")(list_resources)
@@ -201,7 +206,7 @@ def main():
 
         # Import all tool modules to ensure they are registered
         logger.info("Ensuring all tools are registered for HTTP transport")
-        from . import accounts, campaigns, adsets, ads, insights, authentication
+        from . import organizations, accounts, campaigns, adsets, ads, insights, authentication
         from . import ads_library, budget_schedules, reports, openai_deep_research
 
         # Setup HTTP authentication middleware (Rule1)

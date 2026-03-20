@@ -12,7 +12,10 @@ from .server import mcp_server
 async def get_adsets(account_id: str, access_token: Optional[str] = None, limit: int = 10, campaign_id: str = "") -> str:
     """
     Get ad sets for a Meta Ads account with optional filtering by campaign.
-    
+
+    Requires a valid account_id. Call list_my_organizations first to get your
+    organization_id, then get_ad_accounts to find account IDs.
+
     Args:
         account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)

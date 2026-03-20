@@ -44,16 +44,14 @@ async def get_ad_accounts(access_token: Optional[str] = None, organization_id: O
     """
     Get ad accounts accessible by a user.
 
-    When authenticated via Rule1 (Clerk/pgs_ token), returns connected accounts
-    from the Rule1 database. When a direct Meta access_token is provided,
-    queries Meta's Graph API directly.
+    Requires organization_id — use list_my_organizations first to get yours.
 
     amount_spent and balance are returned in currency units (e.g. USD dollars),
     not cents.
 
     Args:
         access_token: Meta API access token (optional - will use cached token if not provided)
-        organization_id: Rule1 organization ID (required for multi-org users, use list_my_organizations to find yours)
+        organization_id: Rule1 organization ID (required — use list_my_organizations to find yours)
         user_id: Meta user ID or "me" for the current user
         limit: Maximum number of accounts to return (default: 200)
     """
@@ -95,8 +93,8 @@ async def get_ad_accounts(access_token: Optional[str] = None, organization_id: O
     if not access_token:
         return json.dumps({
             "error": {
-                "message": "Authentication Required",
-                "details": "Provide a Bearer token (Clerk JWT or pgs_xxx) or a direct Meta access_token",
+                "message": "Organization ID required",
+                "details": "Pass organization_id to scope this request. Use the list_my_organizations tool to find your organization IDs.",
             }
         }, indent=2)
 
@@ -119,7 +117,10 @@ async def get_ad_accounts(access_token: Optional[str] = None, organization_id: O
 async def get_account_info(account_id: str, access_token: Optional[str] = None) -> str:
     """
     Get detailed information about a specific ad account.
-    
+
+    Requires a valid account_id. Call list_my_organizations first to get your
+    organization_id, then get_ad_accounts to find account IDs.
+
     Args:
         account_id: Meta Ads account ID (format: act_XXXXXXXXX)
         access_token: Meta API access token (optional - will use cached token if not provided)
